@@ -14,49 +14,40 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
         await borsa.load_markets()
 
-        # ---- 1. MAKSİMUM İŞLEM SINIRI KONTROLÜ ----
-        # Borsadaki açık pozisyonları ve bekleyen (limit) emirleri çekiyoruz
+        # 1. MAKSİMUM İŞLEM SINIRI KONTROLÜ
         acik_pozisyonlar = await borsa.fetch_positions()
         bekleyen_emirler = await borsa.fetch_open_orders()
         
         aktif_coinler = set()
-        
-        # Hacmi 0'dan büyük olan (gerçekten içinde olduğumuz) pozisyonları say
         for p in acik_pozisyonlar:
             if float(p.get('contracts', 0) or p.get('positionAmt', 0)) > 0:
                 aktif_coinler.add(p['symbol'])
                 
-        # Bekleyen (Limit) emirleri de say, çünkü onlar da marjin kilitler
         for e in bekleyen_emirler:
             aktif_coinler.add(e['symbol'])
             
         if len(aktif_coinler) >= ayarlar['max_trades']:
-            return {"durum": "IPTAL", "hata_mesaji": f"Maksimum işlem sınırında ({ayarlar['max_trades']})"}
+            return {"durum": "IPTAL", "hata_mesaji": f"Maksimum sınır aşıldı ({ayarlar['max_trades']})"}
 
-        # Kaldıraç ayarı
         try:
             await borsa.set_leverage(sinyal['kaldirac'], sembol)
             await borsa.set_margin_mode(sinyal['margin_tipi'].lower(), sembol)
         except:
             pass
 
-        # ---- 2. CÜZDAN BAKİYESİ VE MOD HESAPLAMA ----
+        # 2. CÜZDAN BAKİYESİ VE MOD HESAPLAMA (Wallet Balance Bileşik Getiri Mantığı)
         bakiye = await borsa.fetch_balance()
-        # 'free' (kullanılabilir) yerine 'total' (Cüzdan Bakiyesi) alıyoruz
         wallet_balance = bakiye['total'].get('USDT', 0)
         
         if wallet_balance < 2:
             return {"durum": "HATA", "hata_mesaji": "Bakiye Çok Düşük"}
 
-        # Kullanıcının seçtiği moda göre işlem hacmini belirliyoruz
         if ayarlar['trade_mode'] == 'FIXED':
             kullanilacak_usdt = ayarlar['trade_amount']
-        else: # PERCENT durumu
+        else:
             kullanilacak_usdt = wallet_balance * (ayarlar['trade_amount'] / 100)
         
         toplam_hacim_usdt = kullanilacak_usdt * sinyal['kaldirac']
-        
-        # Miktar hesaplama ve yuvarlama
         miktar = toplam_hacim_usdt / sinyal['giris']
         miktar = borsa.amount_to_precision(sembol, miktar)
 
@@ -71,7 +62,6 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
             symbol=sembol, type='limit', side=yon,
             amount=float(miktar), price=sinyal['giris'], params=params
         )
-
         return {"durum": "BASARILI", "emir_id": emir['id']}
 
     except Exception as e:
