@@ -11,7 +11,7 @@ from trader import islem_ac
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# Gönderdiğin o ID'yi buraya, direksiyonun başına geçirdim.
+# Kralın ID'si
 KRALIN_ID = 39983605 
 
 @client.on(events.NewMessage(func=lambda e: e.is_private))
@@ -92,30 +92,39 @@ async def fiyat_takip_radari():
         try:
             conn = sqlite3.connect(db.DB_NAME)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, coin, yon, giris, tp1, sl FROM active_signals WHERE durum = 'BEKLIYOR'")
+            cursor.execute("SELECT id, coin, yon, giris, tp1, sl, durum FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
             bekleyenler = cursor.fetchall()
             
             if bekleyenler:
                 tickerlar = await borsa.fetch_tickers()
                 
                 for sinyal in bekleyenler:
-                    s_id, coin, yon, giris, tp1, sl = sinyal
+                    s_id, coin, yon, giris, tp1, sl, durum = sinyal
                     sembol = coin.replace('USDT', '') + '/USDT:USDT'
                     
                     if sembol in tickerlar:
                         guncel_fiyat = tickerlar[sembol]['last']
                         
-                        tp_vurdu_mu = (yon == 'LONG' and guncel_fiyat >= tp1) or (yon == 'SHORT' and guncel_fiyat <= tp1)
-                        stop_oldu_mu = (yon == 'LONG' and guncel_fiyat <= sl) or (yon == 'SHORT' and guncel_fiyat >= sl)
-                        
                         yeni_durum, bildirim = None, None
                         
-                        if tp_vurdu_mu:
-                            yeni_durum = 'TP_VURDU'
-                            bildirim = f"🎯 **HEDEF VURULDU!** 🎯\n\n#{coin} {yon} işlemimiz başarıyla TP1 hedefine ulaştı!\nKralın Sinyalleri kazandırmaya devam ediyor. 👑💰"
-                        elif stop_oldu_mu:
-                            yeni_durum = 'STOP_OLDU'
-                            bildirim = f"🛡 **Kalkan Devrede (STOP)** 🛡\n\n#{coin} {yon} işlemi stop seviyesine ulaştı. Kasa güvenliği sağlandı."
+                        # 1. AŞAMA: ENTRY KONTROLÜ
+                        if durum == 'BEKLIYOR':
+                            entry_vurdu_mu = (yon == 'LONG' and guncel_fiyat <= giris) or (yon == 'SHORT' and guncel_fiyat >= giris)
+                            if entry_vurdu_mu:
+                                yeni_durum = 'ISLEMDE'
+                                bildirim = f"🟢 **İŞLEME GİRİLDİ!** 🟢\n\n#{coin} {yon} işlemi {giris} seviyesinden aktifleşti!\nHedefler bekleniyor... 🚀"
+                        
+                        # 2. AŞAMA: TP VE SL KONTROLÜ
+                        elif durum == 'ISLEMDE':
+                            tp_vurdu_mu = (yon == 'LONG' and guncel_fiyat >= tp1) or (yon == 'SHORT' and guncel_fiyat <= tp1)
+                            stop_oldu_mu = (yon == 'LONG' and guncel_fiyat <= sl) or (yon == 'SHORT' and guncel_fiyat >= sl)
+                            
+                            if tp_vurdu_mu:
+                                yeni_durum = 'TP_VURDU'
+                                bildirim = f"🎯 **HEDEF VURULDU!** 🎯\n\n#{coin} {yon} işlemimiz başarıyla TP1 hedefine ulaştı!\nKralın Sinyalleri kazandırmaya devam ediyor. 👑💰"
+                            elif stop_oldu_mu:
+                                yeni_durum = 'STOP_OLDU'
+                                bildirim = f"🛡 **Kalkan Devrede (STOP)** 🛡\n\n#{coin} {yon} işlemi stop seviyesine ulaştı. Kasa güvenliği sağlandı."
                             
                         if yeni_durum:
                             cursor.execute("UPDATE active_signals SET durum = ? WHERE id = ?", (yeni_durum, s_id))
