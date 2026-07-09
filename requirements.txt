@@ -1,0 +1,4 @@
+Telethon==1.33.1
+ccxt==4.2.59
+python-dotenv==1.0.1
+asyncio==3.4.3
