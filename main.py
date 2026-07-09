@@ -9,8 +9,6 @@ from parser import parse_signal
 from trader import islem_ac
 
 # ----- KRİTİK DÜZELTME: PYTHON 3.14 EVENT LOOP UYUMU -----
-# Motoru kodun en başında manuel olarak çalıştırıp sabitliyoruz.
-# Böylece "no running event loop" hatasını kökünden çözüyoruz.
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 # ----------------------------------------------------------
@@ -92,7 +90,7 @@ async def sinyal_handler(event):
     print(f"✅ Operasyon Tamamlandı: {len(aktif_uyeler)} üyeden {basarili} tanesine emir iletildi.")
 
 async def fiyat_takip_radari():
-    await client.wait_until_ready()
+    # Eski, hatalı olan "await client.wait_until_ready()" satırı buradan sökülüp atıldı.
     borsa = ccxt.mexc()
     
     while True:
@@ -156,5 +154,5 @@ async def main():
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # asyncio.run(main()) yerine az önce manuel kurduğumuz motoru kullanıyoruz:
+    # asyncio.run(main()) yerine manuel kurduğumuz loop'u çağırıyoruz.
     loop.run_until_complete(main())
