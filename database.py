@@ -6,20 +6,18 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # KULLANICI TABLOSU: trade_mode, trade_amount ve max_trades eklendi
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             telegram_id INTEGER PRIMARY KEY,
             mexc_api_key TEXT NOT NULL,
             mexc_api_secret TEXT NOT NULL,
             is_active INTEGER DEFAULT 1,
-            trade_mode TEXT DEFAULT 'PERCENT', -- Seçenekler: 'PERCENT' (Yüzde) veya 'FIXED' (Sabit USDT)
-            trade_amount REAL DEFAULT 5,       -- Yüzde seçiliyse %5, Sabit seçiliyse 5 USDT anlamına gelir
-            max_trades INTEGER DEFAULT 8       -- Aynı anda açılabilecek maksimum işlem sayısı
+            trade_mode TEXT DEFAULT 'PERCENT',
+            trade_amount REAL DEFAULT 5,
+            max_trades INTEGER DEFAULT 8
         )
     ''')
     
-    # SİNYAL TAKİP TABLOSU
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS active_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +47,6 @@ def add_user(telegram_id, api_key, api_secret):
     conn.close()
 
 def update_user_settings(telegram_id, mode, amount, max_trades):
-    """VIP üye bot üzerinden ayarlarını değiştirdiğinde çalışır."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
@@ -63,7 +60,6 @@ def update_user_settings(telegram_id, mode, amount, max_trades):
 def get_all_active_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # İşlem yaparken kullanacağımız tüm ayarları çekiyoruz
     cursor.execute('''
         SELECT telegram_id, mexc_api_key, mexc_api_secret, trade_mode, trade_amount, max_trades 
         FROM users WHERE is_active = 1
@@ -82,6 +78,13 @@ def sinyal_kaydet(coin, yon, giris, tp1, sl):
         INSERT INTO active_signals (coin, yon, giris, tp1, sl, durum) 
         VALUES (?, ?, ?, ?, ?, 'BEKLIYOR')
     ''', (coin, yon, giris, tp1, sl))
+    conn.commit()
+    conn.close()
+    
+def toggle_user_active(telegram_id, durum):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE users SET is_active = ? WHERE telegram_id = ?', (durum, telegram_id))
     conn.commit()
     conn.close()
 
