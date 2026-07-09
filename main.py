@@ -24,6 +24,18 @@ async def dm_handler(event):
     mesaj = event.message.message
     gonderen_id = event.sender_id
     
+    # KULLANICI KARŞILAMA KOMUTU
+    if mesaj == '/start':
+        karsilama_metni = (
+            "👑 **Kralın Sinyalleri VIP Sistemine Hoş Geldin.** 👑\n\n"
+            "Bu bot, kanaldaki sinyalleri milisaniyeler içinde MEXC hesabına iletir.\n\n"
+            "Sisteme entegre olmak için API anahtarlarını aşağıdaki formatta bana göndermelisin:\n"
+            "`/kayit SENIN_API_KEY_BURAYA SENIN_SECRET_KEY_BURAYA`"
+        )
+        await event.reply(karsilama_metni)
+        return
+
+    # KULLANICI KAYIT KOMUTU
     if mesaj.startswith('/kayit'):
         try:
             _, api_key, api_secret = mesaj.split()
@@ -32,6 +44,7 @@ async def dm_handler(event):
         except ValueError:
             await event.reply("❌ Hatalı kullanım!\nDoğrusu: `/kayit API_KEY API_SECRET`")
 
+    # KULLANICI AYAR KOMUTU
     elif mesaj.startswith('/ayar'):
         try:
             _, mod, miktar, max_islem = mesaj.split()
@@ -43,14 +56,17 @@ async def dm_handler(event):
         except Exception:
             await event.reply("❌ Hatalı kullanım!\nÖrnek: `/ayar PERCENT 5 8` veya `/ayar FIXED 50 5`")
             
+    # DURDUR KOMUTU
     elif mesaj.startswith('/durdur'):
         db.toggle_user_active(gonderen_id, 0)
         await event.reply("🛑 Bot uyku moduna alındı! Artık gelen sinyaller sende işlem açmayacak.\nYeniden başlatmak için `/devam` yazabilirsin.")
 
+    # DEVAM KOMUTU
     elif mesaj.startswith('/devam'):
         db.toggle_user_active(gonderen_id, 1)
         await event.reply("✅ Kalkanlar indirildi, silahlar aktif! Bot yeniden piyasayı dinliyor... 🦅")
         
+    # KRALIN ACİL DURUM ŞALTERİ
     elif mesaj == '/fisi_cek':
         if gonderen_id == KRALIN_ID:
             await event.reply("🚨 KRAL EMRİ ALINDI. TÜM SİSTEM FİŞTEN ÇEKİLİYOR... 🚨")
@@ -90,7 +106,6 @@ async def sinyal_handler(event):
     print(f"✅ Operasyon Tamamlandı: {len(aktif_uyeler)} üyeden {basarili} tanesine emir iletildi.")
 
 async def fiyat_takip_radari():
-    # Eski, hatalı olan "await client.wait_until_ready()" satırı buradan sökülüp atıldı.
     borsa = ccxt.mexc()
     
     while True:
@@ -154,5 +169,4 @@ async def main():
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # asyncio.run(main()) yerine manuel kurduğumuz loop'u çağırıyoruz.
     loop.run_until_complete(main())
