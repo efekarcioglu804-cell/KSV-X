@@ -1,0 +1,6 @@
+# .gitignore dosyası
+.env
+*.session
+*.sqlite
+*.sqlite3
+__pycache__/
