@@ -8,6 +8,13 @@ import database as db
 from parser import parse_signal
 from trader import islem_ac
 
+# ----- KRİTİK DÜZELTME: PYTHON 3.14 EVENT LOOP UYUMU -----
+# Motoru kodun en başında manuel olarak çalıştırıp sabitliyoruz.
+# Böylece "no running event loop" hatasını kökünden çözüyoruz.
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+# ----------------------------------------------------------
+
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
@@ -149,4 +156,5 @@ async def main():
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # asyncio.run(main()) yerine az önce manuel kurduğumuz motoru kullanıyoruz:
+    loop.run_until_complete(main())
