@@ -1,64 +1,89 @@
 import sqlite3
 
-# Veritabanı dosyamızın adı. Kod çalıştığında klasörde otomatik oluşacak.
 DB_NAME = "vip_kullanicilar.sqlite"
 
 def init_db():
-    """Sistemin kalbini (Veritabanı ve Tabloları) oluşturur."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Kullanıcılar tablosunu yaratıyoruz. 
-    # telegram_id benzersiz (PRIMARY KEY) olmak zorunda.
+    # KULLANICI TABLOSU: trade_mode, trade_amount ve max_trades eklendi
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             telegram_id INTEGER PRIMARY KEY,
             mexc_api_key TEXT NOT NULL,
             mexc_api_secret TEXT NOT NULL,
-            is_active INTEGER DEFAULT 1
+            is_active INTEGER DEFAULT 1,
+            trade_mode TEXT DEFAULT 'PERCENT', -- Seçenekler: 'PERCENT' (Yüzde) veya 'FIXED' (Sabit USDT)
+            trade_amount REAL DEFAULT 5,       -- Yüzde seçiliyse %5, Sabit seçiliyse 5 USDT anlamına gelir
+            max_trades INTEGER DEFAULT 8       -- Aynı anda açılabilecek maksimum işlem sayısı
+        )
+    ''')
+    
+    # SİNYAL TAKİP TABLOSU
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS active_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            coin TEXT,
+            yon TEXT,
+            giris REAL,
+            tp1 REAL,
+            sl REAL,
+            durum TEXT DEFAULT 'BEKLIYOR' 
         )
     ''')
     conn.commit()
     conn.close()
-    print("Veritabanı modülü devrede. VIP kayıtları için hazır.")
 
 def add_user(telegram_id, api_key, api_secret):
-    """Yeni VIP üye ekler. Üye zaten varsa API bilgilerini günceller."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # ON CONFLICT ile aynı adam ikinci kez kayıt olursa hata vermek yerine güncelliyoruz.
     cursor.execute('''
-        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active)
-        VALUES (?, ?, ?, 1)
+        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades)
+        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8)
         ON CONFLICT(telegram_id) DO UPDATE SET
             mexc_api_key=excluded.mexc_api_key,
             mexc_api_secret=excluded.mexc_api_secret,
             is_active=1
     ''', (telegram_id, api_key, api_secret))
-    
     conn.commit()
     conn.close()
 
-def remove_user(telegram_id):
-    """Kullanıcının sistemden sinyal almasını (üyeliğini) durdurur."""
+def update_user_settings(telegram_id, mode, amount, max_trades):
+    """VIP üye bot üzerinden ayarlarını değiştirdiğinde çalışır."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('UPDATE users SET is_active = 0 WHERE telegram_id = ?', (telegram_id,))
+    cursor.execute('''
+        UPDATE users 
+        SET trade_mode = ?, trade_amount = ?, max_trades = ? 
+        WHERE telegram_id = ?
+    ''', (mode, amount, max_trades, telegram_id))
     conn.commit()
     conn.close()
 
 def get_all_active_users():
-    """Sinyal geldiğinde emrin iletileceği tüm aktif VIP üyeleri mermiye dizer."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT telegram_id, mexc_api_key, mexc_api_secret FROM users WHERE is_active = 1')
+    # İşlem yaparken kullanacağımız tüm ayarları çekiyoruz
+    cursor.execute('''
+        SELECT telegram_id, mexc_api_key, mexc_api_secret, trade_mode, trade_amount, max_trades 
+        FROM users WHERE is_active = 1
+    ''')
     users = cursor.fetchall()
     conn.close()
-    
-    # Veriyi diğer dosyalarda kolay kullanmak için liste içinde sözlük (dict) olarak döndürüyoruz.
-    return [{"telegram_id": row[0], "api_key": row[1], "api_secret": row[2]} for row in users]
+    return [{
+        "telegram_id": row[0], "api_key": row[1], "api_secret": row[2], 
+        "trade_mode": row[3], "trade_amount": row[4], "max_trades": row[5]
+    } for row in users]
 
-# Dosya ilk kez çalıştırıldığında tabloları kursun diye init_db() çağrılır.
+def sinyal_kaydet(coin, yon, giris, tp1, sl):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO active_signals (coin, yon, giris, tp1, sl, durum) 
+        VALUES (?, ?, ?, ?, ?, 'BEKLIYOR')
+    ''', (coin, yon, giris, tp1, sl))
+    conn.commit()
+    conn.close()
+
 if __name__ == "__main__":
     init_db()
