@@ -14,7 +14,9 @@ def init_db():
             is_active INTEGER DEFAULT 1,
             trade_mode TEXT DEFAULT 'PERCENT',
             trade_amount REAL DEFAULT 5,
-            max_trades INTEGER DEFAULT 8
+            max_trades INTEGER DEFAULT 8,
+            tp_ratios TEXT DEFAULT '25,25,25,25',
+            stop_mode TEXT DEFAULT 'NONE'
         )
     ''')
     
@@ -25,8 +27,12 @@ def init_db():
             yon TEXT,
             giris REAL,
             tp1 REAL,
+            tp2 REAL,
+            tp3 REAL,
+            tp4 REAL,
             sl REAL,
-            durum TEXT DEFAULT 'BEKLIYOR' 
+            durum TEXT DEFAULT 'BEKLIYOR',
+            asama INTEGER DEFAULT 0 
         )
     ''')
     conn.commit()
@@ -36,8 +42,8 @@ def add_user(telegram_id, api_key, api_secret):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades)
-        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8)
+        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades, tp_ratios, stop_mode)
+        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8, '25,25,25,25', 'NONE')
         ON CONFLICT(telegram_id) DO UPDATE SET
             mexc_api_key=excluded.mexc_api_key,
             mexc_api_secret=excluded.mexc_api_secret,
@@ -49,38 +55,11 @@ def add_user(telegram_id, api_key, api_secret):
 def update_user_settings(telegram_id, mode, amount, max_trades):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE users 
-        SET trade_mode = ?, trade_amount = ?, max_trades = ? 
-        WHERE telegram_id = ?
-    ''', (mode, amount, max_trades, telegram_id))
+    cursor.execute("UPDATE users SET trade_mode = ?, trade_amount = ?, max_trades = ? WHERE telegram_id = ?", 
+                   (mode, amount, max_trades, telegram_id))
     conn.commit()
     conn.close()
 
-def get_all_active_users():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT telegram_id, mexc_api_key, mexc_api_secret, trade_mode, trade_amount, max_trades 
-        FROM users WHERE is_active = 1
-    ''')
-    users = cursor.fetchall()
-    conn.close()
-    return [{
-        "telegram_id": row[0], "api_key": row[1], "api_secret": row[2], 
-        "trade_mode": row[3], "trade_amount": row[4], "max_trades": row[5]
-    } for row in users]
-
-def sinyal_kaydet(coin, yon, giris, tp1, sl):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO active_signals (coin, yon, giris, tp1, sl, durum) 
-        VALUES (?, ?, ?, ?, ?, 'BEKLIYOR')
-    ''', (coin, yon, giris, tp1, sl))
-    conn.commit()
-    conn.close()
-    
 def toggle_user_active(telegram_id, durum):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -88,5 +67,21 @@ def toggle_user_active(telegram_id, durum):
     conn.commit()
     conn.close()
 
-if __name__ == "__main__":
-    init_db()
+def get_all_active_users():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE is_active = 1")
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR')
+    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl))
+    conn.commit()
+    conn.close()
