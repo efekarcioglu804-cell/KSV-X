@@ -36,8 +36,6 @@ def init_db():
             eklenme_zamani REAL
         )
     ''')
-    
-    # KRALIN GÜNLÜK PNL VE İSTATİSTİK TABLOSU
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_daily_stats (
             telegram_id INTEGER,
@@ -50,10 +48,12 @@ def init_db():
         )
     ''')
     
-    try:
-        cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
-    except:
-        pass
+    # Yeni Güncellemeler (Katılanlar Listesi)
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
+    except: pass
+    
     conn.commit()
     conn.close()
 
@@ -117,10 +117,24 @@ def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl):
         INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, eklenme_zamani) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?)
     ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, su_an))
+    signal_id = cursor.lastrowid # Sinyalin ID'sini döndür
     conn.commit()
     conn.close()
+    return signal_id
 
-# GÜNLÜK PNL VE RAPORLAMA FONKSİYONLARI
+def sinyale_katilan_ekle(signal_id, telegram_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT katilanlar FROM active_signals WHERE id = ?", (signal_id,))
+    row = cursor.fetchone()
+    if row:
+        mevcut = row[0] if row[0] else ""
+        if str(telegram_id) not in mevcut.split(','):
+            yeni = mevcut + f"{telegram_id},"
+            cursor.execute("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (yeni, signal_id))
+            conn.commit()
+    conn.close()
+
 def update_daily_stat(telegram_id, stat_type, value=1, profit=0.0):
     tarih = datetime.date.today().strftime("%Y-%m-%d")
     conn = sqlite3.connect(DB_NAME)
