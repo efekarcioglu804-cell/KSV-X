@@ -85,3 +85,28 @@ def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl):
     ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl))
     conn.commit()
     conn.close()
+def update_tp_ratios(telegram_id, ratios):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET tp_ratios = ? WHERE telegram_id = ?", (ratios, telegram_id))
+    conn.commit()
+    conn.close()
+
+def update_stop_mode(telegram_id, mode):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET stop_mode = ? WHERE telegram_id = ?", (mode, telegram_id))
+    conn.commit()
+    conn.close()
+
+def get_user(telegram_id):
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return user
+
+
+
