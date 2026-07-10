@@ -8,15 +8,11 @@ import database as db
 from parser import parse_signal
 from trader import islem_ac
 
-# ----- KRİTİK DÜZELTME: PYTHON 3.14 EVENT LOOP UYUMU -----
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-# ----------------------------------------------------------
 
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
-
-# Kralın ID'si
 KRALIN_ID = 39983605 
 
 @client.on(events.NewMessage(func=lambda e: e.is_private))
@@ -24,68 +20,52 @@ async def dm_handler(event):
     mesaj = event.message.message
     gonderen_id = event.sender_id
     
-    # KULLANICI KARŞILAMA KOMUTU
     if mesaj == '/start':
-        karsilama_metni = (
-            "👑 **Kralın Sinyalleri VIP Sistemine Hoş Geldin.** 👑\n\n"
-            "Bu bot, kanaldaki sinyalleri milisaniyeler içinde MEXC hesabına iletir.\n\n"
-            "Sisteme entegre olmak için API anahtarlarını aşağıdaki formatta bana göndermelisin:\n"
-            "`/kayit SENIN_API_KEY_BURAYA SENIN_SECRET_KEY_BURAYA`"
-        )
-        await event.reply(karsilama_metni)
+        await event.reply("👑 **Kralın Sinyalleri VIP Sistemine Hoş Geldin.** 👑\nSisteme entegre olmak için:\n`/kayit API_KEY API_SECRET`")
         return
 
-    # KULLANICI KAYIT KOMUTU
     if mesaj.startswith('/kayit'):
         try:
             _, api_key, api_secret = mesaj.split()
             db.add_user(gonderen_id, api_key, api_secret)
-            await event.reply("✅ Kralın Sinyalleri VIP sistemine hoş geldin!\nAPI anahtarların şifrelenerek kasaya kilitlendi.\n\nRisk ayarlarını yapmak için /ayar komutunu kullan.\nÖrnek:\nYüzde için: `/ayar PERCENT 5 8` (Kasanın %5'i, Max 8 İşlem)\nSabit için: `/ayar FIXED 50 5` (İşlem başı 50 USDT, Max 5 İşlem)")
+            await event.reply("✅ Kasaya kilitlendi! Risk ayarları için örnek:\n`/ayar PERCENT 5 8` veya `/ayar FIXED 50 5`")
         except ValueError:
-            await event.reply("❌ Hatalı kullanım!\nDoğrusu: `/kayit API_KEY API_SECRET`")
+            await event.reply("❌ Doğrusu: `/kayit API_KEY API_SECRET`")
 
-    # KULLANICI AYAR KOMUTU
     elif mesaj.startswith('/ayar'):
         try:
             _, mod, miktar, max_islem = mesaj.split()
-            if mod.upper() not in ['PERCENT', 'FIXED']:
-                raise ValueError("Mod hatalı")
-                
+            if mod.upper() not in ['PERCENT', 'FIXED']: raise ValueError
             db.update_user_settings(gonderen_id, mod.upper(), float(miktar), int(max_islem))
-            await event.reply(f"⚙️ Ayarların güncellendi!\nMod: {mod.upper()}\nMiktar: {miktar}\nMaksimum Açık İşlem: {max_islem}")
-        except Exception:
-            await event.reply("❌ Hatalı kullanım!\nÖrnek: `/ayar PERCENT 5 8` veya `/ayar FIXED 50 5`")
-            
-    # DURDUR KOMUTU
+            await event.reply(f"⚙️ Ayarlandı! Mod: {mod.upper()}, Miktar: {miktar}, Max İşlem: {max_islem}")
+        except:
+            await event.reply("❌ Örnek: `/ayar PERCENT 5 8`")
+
     elif mesaj.startswith('/durdur'):
         db.toggle_user_active(gonderen_id, 0)
-        await event.reply("🛑 Bot uyku moduna alındı! Artık gelen sinyaller sende işlem açmayacak.\nYeniden başlatmak için `/devam` yazabilirsin.")
+        await event.reply("🛑 Bot uyku moduna alındı!")
 
-    # DEVAM KOMUTU
     elif mesaj.startswith('/devam'):
         db.toggle_user_active(gonderen_id, 1)
-        await event.reply("✅ Kalkanlar indirildi, silahlar aktif! Bot yeniden piyasayı dinliyor... 🦅")
+        await event.reply("✅ Kalkanlar indirildi, silahlar aktif! 🦅")
         
-    # KRALIN ACİL DURUM ŞALTERİ
     elif mesaj == '/fisi_cek':
         if gonderen_id == KRALIN_ID:
             await event.reply("🚨 KRAL EMRİ ALINDI. TÜM SİSTEM FİŞTEN ÇEKİLİYOR... 🚨")
-            print("!!! ACİL DURUM ŞALTERİ ÇEKİLDİ. SİSTEM KAPATILIYOR !!!")
             await client.disconnect() 
         else:
             await event.reply("❌ Bu komutu sadece Kral kullanabilir.")
 
 @client.on(events.NewMessage(chats=VIP_KANAL_ID))
 async def sinyal_handler(event):
-    mesaj_metni = event.message.message
-    sinyal_verisi = parse_signal(mesaj_metni)
-    
-    if not sinyal_verisi: return
+    mesaj = event.message.message
+    sinyal = parse_signal(mesaj)
+    if not sinyal: return
         
-    print(f"\n🚀 [YENİ SİNYAL] {sinyal_verisi['coin']} için operasyon başlatılıyor...")
+    print(f"\n🚀 [YENİ SİNYAL] {sinyal['coin']} operasyonu başlatılıyor...")
     db.sinyal_kaydet(
-        sinyal_verisi['coin'], sinyal_verisi['yon'], 
-        sinyal_verisi['giris'], sinyal_verisi['tp_listesi'][0], sinyal_verisi['sl']
+        sinyal['coin'], sinyal['yon'], sinyal['giris'], 
+        sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl']
     )
     
     aktif_uyeler = db.get_all_active_users()
@@ -93,17 +73,12 @@ async def sinyal_handler(event):
         
     gorevler = []
     for uye in aktif_uyeler:
-        ayarlar = {
-            'trade_mode': uye['trade_mode'],
-            'trade_amount': uye['trade_amount'],
-            'max_trades': uye['max_trades']
-        }
-        gorev = islem_ac(uye['api_key'], uye['api_secret'], ayarlar, sinyal_verisi)
-        gorevler.append(gorev)
+        ayarlar = {'trade_mode': uye['trade_mode'], 'trade_amount': uye['trade_amount'], 'max_trades': uye['max_trades']}
+        gorevler.append(islem_ac(uye['mexc_api_key'], uye['mexc_api_secret'], ayarlar, sinyal))
         
     sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
     basarili = sum(1 for r in sonuclar if isinstance(r, dict) and r.get('durum') == 'BASARILI')
-    print(f"✅ Operasyon Tamamlandı: {len(aktif_uyeler)} üyeden {basarili} tanesine emir iletildi.")
+    print(f"✅ Operasyon: {len(aktif_uyeler)} üyeden {basarili} tanesine iletildi.")
 
 async def fiyat_takip_radari():
     borsa = ccxt.mexc()
@@ -112,60 +87,68 @@ async def fiyat_takip_radari():
         try:
             conn = sqlite3.connect(db.DB_NAME)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, coin, yon, giris, tp1, sl, durum FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
+            cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
             bekleyenler = cursor.fetchall()
             
             if bekleyenler:
-                tickerlar = await borsa.fetch_tickers()
-                
+                gorevler = []
                 for sinyal in bekleyenler:
-                    s_id, coin, yon, giris, tp1, sl, durum = sinyal
-                    sembol = coin.replace('USDT', '') + '/USDT:USDT'
+                    sembol = sinyal[1].replace('USDT', '') + '/USDT:USDT'
+                    gorevler.append(borsa.fetch_ohlcv(sembol, '1m', limit=2))
+                
+                # Işık Hızı: Tüm coinleri aynı milisaniyede sorgula
+                mum_sonuclari = await asyncio.gather(*gorevler, return_exceptions=True)
+                
+                for i, sinyal in enumerate(bekleyenler):
+                    s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama = sinyal
+                    mum_verisi = mum_sonuclari[i]
                     
-                    if sembol in tickerlar:
-                        guncel_fiyat = tickerlar[sembol]['last']
+                    if isinstance(mum_verisi, Exception) or not mum_verisi: continue 
                         
-                        yeni_durum, bildirim = None, None
-                        
-                        # 1. AŞAMA: ENTRY KONTROLÜ
-                        if durum == 'BEKLIYOR':
-                            entry_vurdu_mu = (yon == 'LONG' and guncel_fiyat <= giris) or (yon == 'SHORT' and guncel_fiyat >= giris)
-                            if entry_vurdu_mu:
-                                yeni_durum = 'ISLEMDE'
-                                bildirim = f"🟢 **İŞLEME GİRİLDİ!** 🟢\n\n#{coin} {yon} işlemi {giris} seviyesinden aktifleşti!\nHedefler bekleniyor... 🚀"
-                        
-                        # 2. AŞAMA: TP VE SL KONTROLÜ
-                        elif durum == 'ISLEMDE':
-                            tp_vurdu_mu = (yon == 'LONG' and guncel_fiyat >= tp1) or (yon == 'SHORT' and guncel_fiyat <= tp1)
-                            stop_oldu_mu = (yon == 'LONG' and guncel_fiyat <= sl) or (yon == 'SHORT' and guncel_fiyat >= sl)
-                            
-                            if tp_vurdu_mu:
-                                yeni_durum = 'TP_VURDU'
-                                bildirim = f"🎯 **HEDEF VURULDU!** 🎯\n\n#{coin} {yon} işlemimiz başarıyla TP1 hedefine ulaştı!\nKralın Sinyalleri kazandırmaya devam ediyor. 👑💰"
-                            elif stop_oldu_mu:
-                                yeni_durum = 'STOP_OLDU'
-                                bildirim = f"🛡 **Kalkan Devrede (STOP)** 🛡\n\n#{coin} {yon} işlemi stop seviyesine ulaştı. Kasa güvenliği sağlandı."
-                            
-                        if yeni_durum:
-                            cursor.execute("UPDATE active_signals SET durum = ? WHERE id = ?", (yeni_durum, s_id))
-                            conn.commit()
-                            await client.send_message(VIP_KANAL_ID, bildirim)
+                    son_mum = mum_verisi[-1]
+                    fiyat_high, fiyat_low = son_mum[2], son_mum[3]
+                    yeni_durum, yeni_asama, bildirim = None, None, None
+                    
+                    if durum == 'BEKLIYOR':
+                        if (yon == 'LONG' and fiyat_low <= giris) or (yon == 'SHORT' and fiyat_high >= giris):
+                            yeni_durum, yeni_asama = 'ISLEMDE', 1
+                            bildirim = f"🟢 **İŞLEME GİRİLDİ**\n#{coin} {yon} | {giris} 🚀"
+                    
+                    elif durum == 'ISLEMDE':
+                        if (yon == 'LONG' and fiyat_low <= sl) or (yon == 'SHORT' and fiyat_high >= sl):
+                            yeni_durum = 'STOP_OLDU'
+                            bildirim = f"🛡 **STOP PATLADI** | #{coin} - Kasa korundu."
+                        else:
+                            if asama < 2 and ((yon == 'LONG' and fiyat_high >= tp1) or (yon == 'SHORT' and fiyat_low <= tp1)):
+                                yeni_asama = 2
+                                bildirim = f"🎯 **TP1 VURULDU!** | #{coin}"
+                            elif asama < 3 and ((yon == 'LONG' and fiyat_high >= tp2) or (yon == 'SHORT' and fiyat_low <= tp2)):
+                                yeni_asama = 3
+                                bildirim = f"🎯🎯 **TP2 VURULDU!** | #{coin}"
+                            elif asama < 4 and ((yon == 'LONG' and fiyat_high >= tp3) or (yon == 'SHORT' and fiyat_low <= tp3)):
+                                yeni_asama = 4
+                                bildirim = f"🎯🎯🎯 **TP3 VURULDU!** | #{coin}"
+                            elif asama < 5 and ((yon == 'LONG' and fiyat_high >= tp4) or (yon == 'SHORT' and fiyat_low <= tp4)):
+                                yeni_asama, yeni_durum = 5, 'FULL_TP'
+                                bildirim = f"👑 **FULL TP (TÜM HEDEFLER)** 👑\n#{coin} operasyonu tamamlandı!"
+
+                    if yeni_durum or yeni_asama:
+                        cursor.execute("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id))
+                        conn.commit()
+                        if bildirim: await client.send_message(VIP_KANAL_ID, bildirim)
             conn.close()
         except Exception as e:
-            print(f"Radar Hatası: {e}")
-        
-        await asyncio.sleep(30)
+            print(f"Radar: {e}")
+            
+        await asyncio.sleep(1) # V8 MOTORU - SADECE 1 SANİYE NEFES ALIR
 
 async def main():
-    print("Sistem ayağa kaldırılıyor...")
-    await client.start(bot_token=config.BOT_TOKEN)
-    print("🤖 VIP Bot Telegram'a bağlandı.")
-    
+    print("KSVİX Motorları Ateşleniyor...")
     db.init_db()
+    await client.start(bot_token=config.BOT_TOKEN)
+    print("🤖 KSVİX VIP Telegram'a Sızdı.")
     client.loop.create_task(fiyat_takip_radari())
-    print("🦅 Fiyat Radarı (Tracker) çalıştırıldı. Hedefler bekleniyor...")
-    
-    print("\n👑 KRALIN MAKİNESİ TAMAMEN AKTİF. EMİRLERİNİZİ BEKLİYOR. 👑\n")
+    print("🦅 V8 Radarı Aktif. Piyasa taranıyor...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
