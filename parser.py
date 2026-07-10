@@ -7,8 +7,8 @@ def parse_signal(message_text):
         
     sonuc = {
         "coin": None, "yon": None, "giris": None, 
-        "tp_listesi": [], "sl": None, 
-        "kaldirac": None, "margin_tipi": "CROSS"
+        "tp1": 0, "tp2": 0, "tp3": 0, "tp4": 0, "sl": None, 
+        "kaldirac": 20, "margin_tipi": "CROSS"
     }
     
     if re.search(r'SHORT', metin): sonuc["yon"] = "SHORT"
@@ -21,8 +21,12 @@ def parse_signal(message_text):
     if giris_match: sonuc["giris"] = float(giris_match.group(1).replace(',', '.'))
         
     tp_matches = re.findall(r'TP\d*:\s*([0-9.,]+)', metin)
-    if tp_matches: sonuc["tp_listesi"] = [float(tp.replace(',', '.')) for tp in tp_matches]
-        
+    for i in range(4):
+        if i < len(tp_matches):
+            sonuc[f"tp{i+1}"] = float(tp_matches[i].replace(',', '.'))
+        else:
+            sonuc[f"tp{i+1}"] = sonuc[f"tp{i}"] if i > 0 else 0
+            
     sl_match = re.search(r'STOP\s*LOSS:\s*([0-9.,]+)', metin)
     if sl_match: sonuc["sl"] = float(sl_match.group(1).replace(',', '.'))
 
