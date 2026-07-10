@@ -8,11 +8,14 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
         await borsa.load_markets()
 
-        # --- GÜVENLİK KAPISI: MİNİMUM LİMİT KONTROLÜ ---
+        # --- GÜVENLİK KAPISI: MİNİMUM LİMİT KONTROLÜ (FİLTRE KALDIRILDI) ---
         market = borsa.market(sembol)
-        min_amount = market['limits']['amount']['min']
-        min_cost = market['limits']['cost']['min'] if 'cost' in market['limits'] else 5 # MEXC min 5$
-
+        # Hata vermesin diye None değerlerini 0 yaptık
+        min_amount = market['limits']['amount']['min'] if market['limits']['amount']['min'] is not None else 0
+        
+        # Sınırı 0 yaparak botun her işleme denemesini sağladık
+        min_cost = 0
+        
         acik_pozisyonlar = await borsa.fetch_positions()
         bekleyen_emirler = await borsa.fetch_open_orders()
         
@@ -39,13 +42,9 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         kullanilacak_usdt = ayarlar['trade_amount'] if ayarlar['trade_mode'] == 'FIXED' else wallet_balance * (ayarlar['trade_amount'] / 100.0)
         toplam_hacim_usdt = kullanilacak_usdt * sinyal['kaldirac']
         
-        # --- RİSK YÖNETİMİ FİLTRESİ ---
-        # Eğer borsanın zorunlu kıldığı minimum hacim, senin belirlediğin hacmin çok üstündeyse işlemi engelle
-        if (toplam_hacim_usdt / sinyal['giris']) < min_amount or (toplam_hacim_usdt < min_cost):
-            return {"durum": "IPTAL", "hata_mesaji": "⚠️ Risk yönetimi gereği minimum limit aşıldığı için işleme girilmedi."}
-
         miktar = borsa.amount_to_precision(sembol, toplam_hacim_usdt / sinyal['giris'])
 
+        # Başlangıçta sadece SL kuruyoruz, TP'leri radar manuel kapatacak
         params = {'stopLossPrice': sinyal['sl'], 'reduceOnly': False}
         emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=sinyal['giris'], params=params)
         return {"durum": "BASARILI", "emir_id": emir['id']}
@@ -70,7 +69,7 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         oranlar = [float(x) for x in tp_ratios.split(',')]
-        su_anki_hedef_oran = oranlar[asama - 2]
+        su_anki_hedef_oran = oranlar[asama - 2] # asama 2 = TP1
         
         pozisyonlar = await borsa.fetch_positions([sembol])
         if not pozisyonlar: return
@@ -79,11 +78,13 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
         toplam_miktar = float(poz.get('contracts', 0) or poz.get('positionAmt', 0))
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
         
+        # 1. KISMİ KÂR ALMA
         if toplam_miktar > 0 and su_anki_hedef_oran > 0:
             kapatilacak_miktar = borsa.amount_to_precision(sembol, toplam_miktar * (su_anki_hedef_oran / 100))
             await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
             print(f"💸 {coin} için %{su_anki_hedef_oran} kâr satışı yapıldı.")
 
+        # 2. STOP-LOSS TAŞIMA
         if stop_mode != 'NONE':
             yeni_sl = None
             if stop_mode == 'BREAKEVEN' and asama >= 2:
@@ -95,7 +96,7 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
                 elif asama == 5: yeni_sl = fiyatlar['tp3']
 
             if yeni_sl:
-                await borsa.cancel_all_orders(sembol)
+                await borsa.cancel_all_orders(sembol) # Eski stopu siler
                 await borsa.create_order(sembol, 'limit', ters_yon, toplam_miktar, yeni_sl, params={'stopLossPrice': yeni_sl, 'reduceOnly': True})
                 print(f"🛡️ {coin} Stop Loss güncellendi: {yeni_sl} ({stop_mode})")
 
