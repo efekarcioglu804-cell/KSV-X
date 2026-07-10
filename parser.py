@@ -11,31 +11,41 @@ def parse_signal(message_text):
         "kaldirac": 20, "margin_tipi": "CROSS"
     }
     
+    # YÖN VE COİN
     if re.search(r'SHORT', metin): sonuc["yon"] = "SHORT"
     elif re.search(r'LONG', metin): sonuc["yon"] = "LONG"
+    
+    coin_match = re.search(r'#?([A-Z0-9]+)/?USDT', metin) 
+    if coin_match: sonuc["coin"] = coin_match.group(1) + "USDT"
         
-    coin_match = re.search(r'#?([A-Z0-9]+USDT)', metin) 
-    if coin_match: sonuc["coin"] = coin_match.group(1)
+    # GİRİŞ: Rakamı alır ve %0.05 Kâr Dostu Akıllı Yuvarlama (Tolerans) uygular
+    giris_match = re.search(r'ENTRY[:\s]+([0-9.,]+)', metin)
+    if giris_match: 
+        saf_giris = float(giris_match.group(1).replace(',', '.'))
         
-    giris_match = re.search(r'ENTRY:\s*([0-9.,]+)', metin)
-    if giris_match: sonuc["giris"] = float(giris_match.group(1).replace(',', '.'))
-        
-    tp_matches = re.findall(r'TP\d*:\s*([0-9.,]+)', metin)
-    for i in range(4):
-        if i < len(tp_matches):
-            sonuc[f"tp{i+1}"] = float(tp_matches[i].replace(',', '.'))
-        else:
-            sonuc[f"tp{i+1}"] = sonuc[f"tp{i}"] if i > 0 else 0
+        # KRALIN ESNEME PAYI (%0.05 - Kârı bozmaz, işleme girişi garantiler)
+        if sonuc["yon"] == "LONG":
+            sonuc["giris"] = saf_giris * 1.0005  # Long için fiyatı çok hafif yukarı yuvarlar
+        elif sonuc["yon"] == "SHORT":
+            sonuc["giris"] = saf_giris * 0.9995  # Short için fiyatı çok hafif aşağı yuvarlar
             
-    sl_match = re.search(r'STOP\s*LOSS:\s*([0-9.,]+)', metin)
+    # TP: TP1, TP2, TP3, TP4'ü karmaşadan ayıklar
+    for i in range(1, 5):
+        tp_match = re.search(rf'TP{i}[:\s]+([0-9.,]+)', metin)
+        if tp_match: sonuc[f"tp{i}"] = float(tp_match.group(1).replace(',', '.'))
+        
+    # STOP LOSS
+    sl_match = re.search(r'STOP\s*LOSS[:\s]+([0-9.,]+)', metin)
     if sl_match: sonuc["sl"] = float(sl_match.group(1).replace(',', '.'))
 
-    kaldirac_match = re.search(r'LEVERAGE:\s*(CROSS|ISOLATED)?\s*([0-9]+)X?', metin)
+    # KALDIRAÇ
+    kaldirac_match = re.search(r'LEVERAGE[:\s]+(CROSS|ISOLATED)?\s*([0-9]+)X?', metin)
     if kaldirac_match:
         if kaldirac_match.group(1): sonuc["margin_tipi"] = kaldirac_match.group(1)
         sonuc["kaldirac"] = int(kaldirac_match.group(2))
 
-    if not sonuc["coin"] or not sonuc["giris"] or not sonuc["sl"] or not sonuc["kaldirac"]:
+    # VALIDASYON
+    if not sonuc["coin"] or not sonuc["giris"] or not sonuc["sl"]:
         return None
 
     return sonuc
