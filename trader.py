@@ -1,5 +1,5 @@
 import ccxt.async_support as ccxt
-import asyncio
+import database as db
 
 async def islem_ac(api_key, api_secret, ayarlar, sinyal):
     borsa = ccxt.mexc({
@@ -29,15 +29,16 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         if len(aktif_coinler) >= ayarlar['max_trades']:
             return {"durum": "IPTAL", "hata_mesaji": f"Maksimum sınır aşıldı ({ayarlar['max_trades']})"}
 
+        # KALDIRAÇ VE MARJİN TİPİ AYARLAMA
         try:
             await borsa.set_leverage(sinyal['kaldirac'], sembol)
             await borsa.set_margin_mode(sinyal['margin_tipi'].lower(), sembol)
         except:
             pass
 
-        # 2. CÜZDAN BAKİYESİ VE MOD HESAPLAMA (Wallet Balance Bileşik Getiri Mantığı)
+        # 2. CÜZDAN BAKİYESİ VE MOD HESAPLAMA
         bakiye = await borsa.fetch_balance()
-        wallet_balance = bakiye['total'].get('USDT', 0)
+        wallet_balance = float(bakiye['total'].get('USDT', 0))
         
         if wallet_balance < 2:
             return {"durum": "HATA", "hata_mesaji": "Bakiye Çok Düşük"}
@@ -45,16 +46,16 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         if ayarlar['trade_mode'] == 'FIXED':
             kullanilacak_usdt = ayarlar['trade_amount']
         else:
-            kullanilacak_usdt = wallet_balance * (ayarlar['trade_amount'] / 100)
+            kullanilacak_usdt = wallet_balance * (ayarlar['trade_amount'] / 100.0)
         
         toplam_hacim_usdt = kullanilacak_usdt * sinyal['kaldirac']
         miktar = toplam_hacim_usdt / sinyal['giris']
         miktar = borsa.amount_to_precision(sembol, miktar)
 
-        # 3. Emri Borsaya Gönderme
+        # 3. EMRİ BORSAYA GÖNDERME (Limit Emir ve TP1/SL)
         params = {
             'stopLossPrice': sinyal['sl'],
-            'takeProfitPrice': sinyal['tp_listesi'][0],
+            'takeProfitPrice': sinyal['tp1'],
             'reduceOnly': False
         }
         
