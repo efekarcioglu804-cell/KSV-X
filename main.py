@@ -93,7 +93,7 @@ async def sinyal_handler(event):
     print(f"\n🚀 [YENİ SİNYAL] {sinyal['coin']} operasyonu başlatılıyor...")
     signal_id = db.sinyal_kaydet(
         sinyal['coin'], sinyal['yon'], sinyal['giris'], 
-        sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl']
+        sinyal['tp1'], tp2=sinyal['tp2'], tp3=sinyal['tp3'], tp4=sinyal['tp4'], sl=sinyal['sl']
     )
     
     aktif_uyeler = db.get_all_active_users()
@@ -176,9 +176,18 @@ async def fiyat_takip_radari():
             for sembol, ticker in tickers.items():
                 if sembol not in sembol_map: continue
                 
-                fiyat_guncel = ticker.get('last')
+                # 🎯 KRALIN EMRİ: DOĞRUDAN MARK PRICE (GÖSTERGE FİYATI) OKUYORUZ
+                fiyat_guncel = None
+                if 'mark' in ticker and ticker['mark']:
+                    fiyat_guncel = ticker['mark']
+                elif 'info' in ticker and 'markPrice' in ticker['info']:
+                    fiyat_guncel = ticker['info']['markPrice']
+                else:
+                    fiyat_guncel = ticker.get('last') # Borsa Mark Price yollamazsa mecburi son çare
+
                 if not fiyat_guncel: continue
                 
+                fiyat_guncel = float(fiyat_guncel)
                 fiyat_high = fiyat_guncel
                 fiyat_low = fiyat_guncel
                 
@@ -213,9 +222,9 @@ async def fiyat_takip_radari():
                                 elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
                                 elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
 
-                            esneme_payi = 0.003
-                            if yon == 'LONG': stop_vuruldu = fiyat_low <= (kullanici_stop * (1 + esneme_payi))
-                            else: stop_vuruldu = fiyat_high >= (kullanici_stop * (1 - esneme_payi))
+                            # 🛡️ Toleransa gerek kalmadı! Direk Mark Price kalkanı ile Cornix uyumu:
+                            if yon == 'LONG': stop_vuruldu = fiyat_low <= kullanici_stop
+                            else: stop_vuruldu = fiyat_high >= kullanici_stop
 
                             if stop_vuruldu:
                                 katilanlar_listesi.remove(tid_str)
@@ -227,13 +236,11 @@ async def fiyat_takip_radari():
                                     oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
                                     kalan_oran = 100.0 if asama < 2 else (100.0 - sum(oranlar[:asama-1]))
                                     zarar_yuzdesi = (abs(sl - giris) / giris) * 20 * (kalan_oran / 100.0)
-                                    # YENİ MATEMATİK DÜZELTMESİ (Zarar İçin)
                                     zarar_degeri = uye['trade_amount'] * zarar_yuzdesi if uye['trade_mode'] == 'FIXED' else (zarar_yuzdesi * (uye['trade_amount'] / 100.0))
                                     db.update_daily_stat(uye['telegram_id'], 'stop', value=1, profit=-zarar_degeri)
                                     dm_msg = f"🚨 **#{coin} Orijinal Stop Loss.**\nKalan pozisyon zararla kapatıldı. 🛡️"
                                     
                                 elif stop_tipi == "BREAK_EVEN":
-                                    # ARTIK 'stop' DEĞİL 'be' OLARAK KAYDEDİLİYOR
                                     db.update_daily_stat(uye['telegram_id'], 'be', value=1, profit=0.0)
                                     dm_msg = f"🛡️ **#{coin} İşlemi Giriş Fiyatından Kapatıldı (Break-Even)!**\nSıfır riskle, güvende ayrıldık. 💸"
                                     
@@ -241,7 +248,6 @@ async def fiyat_takip_radari():
                                     oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
                                     kalan_oran = 100.0 - sum(oranlar[:asama-1])
                                     kar_yuzdesi = (abs(kullanici_stop - giris) / giris) * 20 * (kalan_oran / 100.0)
-                                    # YENİ MATEMATİK DÜZELTMESİ (İz Süren Stop Kârı İçin)
                                     kar_degeri = uye['trade_amount'] * kar_yuzdesi if uye['trade_mode'] == 'FIXED' else (kar_yuzdesi * (uye['trade_amount'] / 100.0))
                                     db.update_daily_stat(uye['telegram_id'], 'tp', value=1, profit=kar_degeri)
                                     dm_msg = f"🛡️ **#{coin} İz Süren (MOVING) Stop Patladı!**\nKalan pozisyon KÂRLA kapatıldı! 📈"
@@ -249,6 +255,7 @@ async def fiyat_takip_radari():
                                 try: await client.send_message(uye['telegram_id'], dm_msg)
                                 except: pass
 
+                    # 2. GLOBAL KAPANIŞ (Mark Price garantisi)
                     if (yon == 'LONG' and fiyat_low <= sl) or (yon == 'SHORT' and fiyat_high >= sl):
                         yeni_durum = 'STOP_OLDU'
                     else:
@@ -278,7 +285,6 @@ async def fiyat_takip_radari():
                                 mevcut_satilan_oran = oranlar[yeni_asama - 2]
                                 hedef_fiyat = tp1 if yeni_asama == 2 else (tp2 if yeni_asama == 3 else (tp3 if yeni_asama == 4 else tp4))
                                 kar_yuzdesi = (abs(hedef_fiyat - giris) / giris) * 20 * (mevcut_satilan_oran / 100.0)
-                                # YENİ MATEMATİK DÜZELTMESİ (Normal Hedef Kârı İçin)
                                 kar_degeri = uye['trade_amount'] * kar_yuzdesi if uye['trade_mode'] == 'FIXED' else (kar_yuzdesi * (uye['trade_amount'] / 100.0))
                                 
                                 db.update_daily_stat(uye['telegram_id'], 'tp', value=1, profit=kar_degeri)
@@ -307,14 +313,10 @@ async def gunluk_pnl_raporlayici():
                     acilan = stats['acilan_islem'] if stats else 0
                     tps = stats['tp_adet'] if stats else 0
                     stops = stats['stop_adet'] if stats else 0
-                    
-                    # BE Değerini Güvenli Çekiyoruz
                     try: bes = stats['be_adet'] if stats else 0
                     except: bes = 0
-                    
                     kar = stats['kar_usdt'] if stats else 0.0
                     
-                    # RAPOR DÜZELTMESİ: Sabit modda USD, Yüzde modunda net büyüme
                     kar_metni = f"{kar:+.2f} USDT" if uye['trade_mode'] == 'FIXED' else f"{kar*100:+.2f}% Net Kasa Büyümesi"
                         
                     pnl_msg = (
