@@ -4,17 +4,9 @@ import datetime
 
 DB_NAME = "vip_kullanicilar.sqlite"
 
-def get_connection():
-    # 🛡️ KRALIN GÜNCELLEMESİ: 30 saniye bekleme süresi eklendi (Lock hatası için)
-    conn = sqlite3.connect(DB_NAME, timeout=30)
-    return conn
-
 def init_db():
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # ⚡ WAL MODU: Okuma ve Yazmanın çakışmasını engeller
-    cursor.execute("PRAGMA journal_mode=WAL;") 
-    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             telegram_id INTEGER PRIMARY KEY,
@@ -39,11 +31,9 @@ def init_db():
             tp3 REAL,
             tp4 REAL,
             sl REAL,
-            kaldirac INTEGER DEFAULT 20,
             durum TEXT DEFAULT 'BEKLIYOR',
             asama INTEGER DEFAULT 0,
-            eklenme_zamani REAL,
-            katilanlar TEXT DEFAULT ''
+            eklenme_zamani REAL
         )
     ''')
     cursor.execute('''
@@ -53,16 +43,24 @@ def init_db():
             acilan_islem INTEGER DEFAULT 0,
             tp_adet INTEGER DEFAULT 0,
             stop_adet INTEGER DEFAULT 0,
-            be_adet INTEGER DEFAULT 0,
             kar_usdt REAL DEFAULT 0.0,
             PRIMARY KEY (telegram_id, tarih)
         )
     ''')
+    
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
+    except: pass
+    # YENİ EKLENTİ: Break-Even sayacı için ayrı sütun
+    try: cursor.execute("ALTER TABLE user_daily_stats ADD COLUMN be_adet INTEGER DEFAULT 0")
+    except: pass
+    
     conn.commit()
     conn.close()
 
 def add_user(telegram_id, api_key, api_secret):
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades, tp_ratios, stop_mode)
@@ -76,7 +74,7 @@ def add_user(telegram_id, api_key, api_secret):
     conn.close()
 
 def update_user_settings(telegram_id, mode, amount, max_trades):
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET trade_mode = ?, trade_amount = ?, max_trades = ? WHERE telegram_id = ?", 
                    (mode, amount, max_trades, telegram_id))
@@ -84,28 +82,28 @@ def update_user_settings(telegram_id, mode, amount, max_trades):
     conn.close()
 
 def update_tp_ratios(telegram_id, ratios):
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET tp_ratios = ? WHERE telegram_id = ?", (ratios, telegram_id))
     conn.commit()
     conn.close()
 
 def update_stop_mode(telegram_id, mode):
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET stop_mode = ? WHERE telegram_id = ?", (mode, telegram_id))
     conn.commit()
     conn.close()
 
 def toggle_user_active(telegram_id, durum):
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('UPDATE users SET is_active = ? WHERE telegram_id = ?', (durum, telegram_id))
     conn.commit()
     conn.close()
 
 def get_all_active_users():
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE is_active = 1")
@@ -113,21 +111,21 @@ def get_all_active_users():
     conn.close()
     return users
 
-def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20):
-    conn = get_connection()
+def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl):
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     su_an = time.time()
     cursor.execute('''
-        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?)
-    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an))
+        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, eklenme_zamani) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?)
+    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, su_an))
     signal_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return signal_id
 
 def sinyale_katilan_ekle(signal_id, telegram_id):
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT katilanlar FROM active_signals WHERE id = ?", (signal_id,))
     row = cursor.fetchone()
@@ -141,7 +139,7 @@ def sinyale_katilan_ekle(signal_id, telegram_id):
 
 def update_daily_stat(telegram_id, stat_type, value=1, profit=0.0):
     tarih = datetime.date.today().strftime("%Y-%m-%d")
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO user_daily_stats (telegram_id, tarih, acilan_islem, tp_adet, stop_adet, be_adet, kar_usdt)
@@ -157,7 +155,7 @@ def update_daily_stat(telegram_id, stat_type, value=1, profit=0.0):
         value if stat_type == 'open' else 0,
         value if stat_type == 'tp' else 0,
         value if stat_type == 'stop' else 0,
-        value if stat_type == 'be' else 0,
+        value if stat_type == 'be' else 0, # YENİ: BE kayıt ediliyor
         profit
     ))
     conn.commit()
@@ -165,7 +163,7 @@ def update_daily_stat(telegram_id, stat_type, value=1, profit=0.0):
 
 def get_daily_stats(telegram_id):
     tarih = datetime.date.today().strftime("%Y-%m-%d")
-    conn = get_connection()
+    conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM user_daily_stats WHERE telegram_id = ? AND tarih = ?", (telegram_id, tarih))
