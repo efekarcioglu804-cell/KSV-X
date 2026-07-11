@@ -16,6 +16,26 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
+# 💉 HAYALET COIN ENJEKTÖRÜ
+def hayalet_enjektor(borsa, sembol, coin_adi):
+    if borsa.markets is not None and sembol not in borsa.markets:
+        base = coin_adi.replace('USDT', '')
+        borsa.markets[sembol] = {
+            'id': f"{base}_USDT",
+            'symbol': sembol,
+            'base': base,
+            'quote': 'USDT',
+            'settle': 'USDT',
+            'type': 'swap',
+            'spot': False,
+            'swap': True,
+            'contract': True,
+            'linear': True,
+            'contractSize': 1,
+            'limits': {'amount': {'min': 0}, 'cost': {'min': 0}},
+            'precision': {'amount': 1.0, 'price': 0.0001}
+        }
+
 @client.on(events.NewMessage(func=lambda e: e.is_private))
 async def dm_handler(event):
     mesaj = event.message.message
@@ -109,15 +129,20 @@ async def sinyal_handler(event):
         except Exception: pass
 
 async def fiyat_takip_radari():
-    # ⚡ Borsa WebSocket Bağlantısı Kuruluyor
     borsa_ws = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    
+    try:
+        await borsa_ws.load_markets()
+        print("✅ MEXC Piyasa Verileri Radara Yüklendi.")
+    except Exception as e:
+        print(f"Piyasa verileri yüklenirken hata: {e}")
+
     son_db_okuma = 0
     bekleyenler = []
     
     while True:
         try:
             su_an = time.time()
-            # Disk/CPU yorulmasın diye Veritabanını en fazla 2 saniyede bir okuruz
             if su_an - son_db_okuma >= 2:
                 conn = sqlite3.connect(db.DB_NAME)
                 cursor = conn.cursor()
@@ -126,24 +151,29 @@ async def fiyat_takip_radari():
                 conn.close()
                 son_db_okuma = su_an
             
-            # İçeride hiç açık/bekleyen işlem yoksa WS'yi zorlama, 2 saniye dinlen
             if not bekleyenler:
                 await asyncio.sleep(2)
                 continue
 
             sembol_map = {}
             semboller = []
+            
             for sinyal in bekleyenler:
                 sembol = sinyal[1].replace('USDT', '') + '/USDT:USDT'
+                hayalet_enjektor(borsa_ws, sembol, sinyal[1]) # ENJEKTÖR BURADA ÇALIŞIYOR
                 semboller.append(sembol)
                 sembol_map[sembol] = sinyal
             
-            # ⚡ WEBSOCKET DİNLEME (Sadece listemizdeki coinleri milisaniyelik dinleriz)
-            # Timeout ile sarıyoruz ki piyasa durgunken bot kilitlenip sağırlaşmasın
+            # ⚡ WEBSOCKET DİNLEME (Listeye Enjekte Edilmiş Coinlerle Birlikte)
             try:
                 tickers = await asyncio.wait_for(borsa_ws.watch_tickers(semboller), timeout=2.0)
             except asyncio.TimeoutError:
-                continue # Sorun yok, işlem olmadı. Döngü başa döner, DB'yi günceller.
+                continue 
+            except Exception as e:
+                print(f"WS İzleme Uyarısı (Yenileniyor): {e}")
+                try: await borsa_ws.load_markets(True)
+                except: pass
+                continue
             
             aktif_uyeler = db.get_all_active_users()
             degisiklik_var = False
@@ -154,7 +184,6 @@ async def fiyat_takip_radari():
             for sembol, ticker in tickers.items():
                 if sembol not in sembol_map: continue
                 
-                # Fiyatın saniyelik güncel hali!
                 fiyat_guncel = ticker.get('last')
                 if not fiyat_guncel: continue
                 
@@ -179,7 +208,6 @@ async def fiyat_takip_radari():
                         bildirim = f"🟢 **İŞLEME GİRİLDİ**\n#{coin} {yon} | {giris} 🚀"
                 
                 elif durum == 'ISLEMDE':
-                    # 1. KULLANICIYA ÖZEL KİŞİSEL STOP KONTROLÜ
                     for uye in aktif_uyeler:
                         tid_str = str(uye['telegram_id'])
                         if tid_str in katilanlar_listesi:
@@ -194,7 +222,6 @@ async def fiyat_takip_radari():
                                 elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
                                 elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
 
-                            # %0.3 Mark Price (Slippage) Toleransı (Görünmez stopları engeller)
                             esneme_payi = 0.003
                             if yon == 'LONG':
                                 stop_vuruldu = fiyat_low <= (kullanici_stop * (1 + esneme_payi))
@@ -230,12 +257,10 @@ async def fiyat_takip_radari():
                                 try: await client.send_message(uye['telegram_id'], dm_msg)
                                 except: pass
 
-                    # 2. GLOBAL KAPANIŞ
                     if (yon == 'LONG' and fiyat_low <= sl) or (yon == 'SHORT' and fiyat_high >= sl):
                         yeni_durum = 'STOP_OLDU'
                         bildirim = f"🛡 **STOP PATLADI** | #{coin}"
                     else:
-                        # HEDEFLER
                         if asama < 2 and ((yon == 'LONG' and fiyat_high >= tp1) or (yon == 'SHORT' and fiyat_low <= tp1)):
                             yeni_asama = 2
                             bildirim = f"🎯 **TP1 VURULDU!** | #{coin}"
@@ -287,7 +312,6 @@ async def fiyat_takip_radari():
             conn.close()
             
         except ccxt.NetworkError as e:
-            # WebSocket bir anlığına koparsa bot çökmez, 2 saniye dinlenip yeniden bağlanır
             print(f"WS Ağ Hatası (Diriltiliyor...): {e}")
             await asyncio.sleep(2)
         except Exception as e:
