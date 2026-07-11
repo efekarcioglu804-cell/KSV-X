@@ -38,9 +38,6 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
 @client.on(events.NewMessage(func=lambda e: e.is_private))
 async def dm_handler(event):
     mesaj = event.message.message
-
-    print(f"📬 YENİ MESAJ GELDİ: {gonderen_id} -> {mesaj}") # BU SATIRI EKLE
-    
     gonderen_id = event.sender_id
     
     if mesaj == '/start':
