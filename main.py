@@ -176,20 +176,21 @@ async def fiyat_takip_radari():
             for sembol, ticker in tickers.items():
                 if sembol not in sembol_map: continue
                 
-                # 🎯 KRALIN EMRİ: DOĞRUDAN MARK PRICE (GÖSTERGE FİYATI) OKUYORUZ
-                fiyat_guncel = None
-                if 'mark' in ticker and ticker['mark']:
-                    fiyat_guncel = ticker['mark']
-                elif 'info' in ticker and 'markPrice' in ticker['info']:
-                    fiyat_guncel = ticker['info']['markPrice']
-                else:
-                    fiyat_guncel = ticker.get('last') # Borsa Mark Price yollamazsa mecburi son çare
-
-                if not fiyat_guncel: continue
+                # 🎯 ÇİFT ÇEKİRDEKLİ MİMARİ
+                # 1. Giriş ve TP'ler için İğne Avcısı (Last Price)
+                fiyat_last = ticker.get('last')
+                if not fiyat_last: continue
+                fiyat_last = float(fiyat_last)
                 
-                fiyat_guncel = float(fiyat_guncel)
-                fiyat_high = fiyat_guncel
-                fiyat_low = fiyat_guncel
+                # 2. Stoplar için Güvenlik Kalkanı (Mark Price)
+                fiyat_mark = None
+                if 'mark' in ticker and ticker['mark']:
+                    fiyat_mark = ticker['mark']
+                elif 'info' in ticker and 'markPrice' in ticker['info']:
+                    fiyat_mark = ticker['info']['markPrice']
+                else:
+                    fiyat_mark = fiyat_last # Yedek koruma
+                fiyat_mark = float(fiyat_mark)
                 
                 sinyal = sembol_map[sembol]
                 s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar = sinyal
@@ -203,7 +204,8 @@ async def fiyat_takip_radari():
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 client.loop.create_task(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
-                    elif (yon == 'LONG' and fiyat_low <= giris) or (yon == 'SHORT' and fiyat_high >= giris):
+                    # GİRİŞ: İğneyi affetmez (Last Price)
+                    elif (yon == 'LONG' and fiyat_last <= giris) or (yon == 'SHORT' and fiyat_last >= giris):
                         yeni_durum, yeni_asama = 'ISLEMDE', 1
                         bildirim = f"🟢 **İŞLEME GİRİLDİ**\n#{coin} {yon} | {giris} 🚀"
                 
@@ -222,9 +224,9 @@ async def fiyat_takip_radari():
                                 elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
                                 elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
 
-                            # 🛡️ Toleransa gerek kalmadı! Direk Mark Price kalkanı ile Cornix uyumu:
-                            if yon == 'LONG': stop_vuruldu = fiyat_low <= kullanici_stop
-                            else: stop_vuruldu = fiyat_high >= kullanici_stop
+                            # KİŞİSEL STOP: Kalkan devrede (Mark Price)
+                            if yon == 'LONG': stop_vuruldu = fiyat_mark <= kullanici_stop
+                            else: stop_vuruldu = fiyat_mark >= kullanici_stop
 
                             if stop_vuruldu:
                                 katilanlar_listesi.remove(tid_str)
@@ -255,17 +257,18 @@ async def fiyat_takip_radari():
                                 try: await client.send_message(uye['telegram_id'], dm_msg)
                                 except: pass
 
-                    # 2. GLOBAL KAPANIŞ (Mark Price garantisi)
-                    if (yon == 'LONG' and fiyat_low <= sl) or (yon == 'SHORT' and fiyat_high >= sl):
+                    # GLOBAL STOP: Kalkan devrede (Mark Price)
+                    if (yon == 'LONG' and fiyat_mark <= sl) or (yon == 'SHORT' and fiyat_mark >= sl):
                         yeni_durum = 'STOP_OLDU'
                     else:
-                        if asama < 2 and ((yon == 'LONG' and fiyat_high >= tp1) or (yon == 'SHORT' and fiyat_low <= tp1)):
+                        # TP HEDEFLERİ: İğneyi affetmez (Last Price)
+                        if asama < 2 and ((yon == 'LONG' and fiyat_last >= tp1) or (yon == 'SHORT' and fiyat_last <= tp1)):
                             yeni_asama = 2
-                        elif asama < 3 and ((yon == 'LONG' and fiyat_high >= tp2) or (yon == 'SHORT' and fiyat_low <= tp2)):
+                        elif asama < 3 and ((yon == 'LONG' and fiyat_last >= tp2) or (yon == 'SHORT' and fiyat_last <= tp2)):
                             yeni_asama = 3
-                        elif asama < 4 and ((yon == 'LONG' and fiyat_high >= tp3) or (yon == 'SHORT' and fiyat_low <= tp3)):
+                        elif asama < 4 and ((yon == 'LONG' and fiyat_last >= tp3) or (yon == 'SHORT' and fiyat_last <= tp3)):
                             yeni_asama = 4
-                        elif asama < 5 and ((yon == 'LONG' and fiyat_high >= tp4) or (yon == 'SHORT' and fiyat_low <= tp4)):
+                        elif asama < 5 and ((yon == 'LONG' and fiyat_last >= tp4) or (yon == 'SHORT' and fiyat_last <= tp4)):
                             yeni_asama, yeni_durum = 5, 'FULL_TP'
 
                 if yeni_durum or yeni_asama:
