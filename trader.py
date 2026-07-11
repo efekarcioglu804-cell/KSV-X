@@ -1,16 +1,38 @@
 import ccxt.async_support as ccxt
 import database as db
 
+# 💉 HAYALET COIN ENJEKTÖRÜ: CCXT'nin tanımadığı coinleri zorla beyne yazar
+def hayalet_enjektor(borsa, sembol, coin_adi):
+    if borsa.markets is not None and sembol not in borsa.markets:
+        base = coin_adi.replace('USDT', '')
+        print(f"💉 {coin_adi} için Hayalet Enjektör Devrede! Borsaya zorla tanıtılıyor...")
+        borsa.markets[sembol] = {
+            'id': f"{base}_USDT",
+            'symbol': sembol,
+            'base': base,
+            'quote': 'USDT',
+            'settle': 'USDT',
+            'type': 'swap',
+            'spot': False,
+            'swap': True,
+            'contract': True,
+            'linear': True,
+            'contractSize': 1,
+            'limits': {'amount': {'min': 0}, 'cost': {'min': 0}},
+            'precision': {'amount': 1.0, 'price': 0.0001}
+        }
+
 async def islem_ac(api_key, api_secret, ayarlar, sinyal):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
         sembol = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
+        
         await borsa.load_markets()
-
+        hayalet_enjektor(borsa, sembol, sinyal['coin']) # Enjektör Devrede!
+        
         market = borsa.market(sembol)
 
-        # --- GÜVENLİK KAPISI (FİLTRELER SIFIRLANDI) ---
         min_amount = market['limits']['amount']['min'] if market['limits']['amount']['min'] is not None else 0
         min_cost = 0
         
@@ -33,29 +55,20 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         except:
             pass
 
-        # --- GÜVENLİ BAKİYE KONTROLÜ (Sadece Vadeli Cüzdan) ---
         bakiye = await borsa.fetch_balance({'type': 'swap'})
-        # Boşta duran (free) parayı al, eğer borsa free verisi yollamazsa total parayı al
         wallet_balance = float(bakiye.get('free', {}).get('USDT', bakiye['total'].get('USDT', 0)))
         if wallet_balance < 2: return {"durum": "HATA", "hata_mesaji": "Bakiye Çok Düşük"}
 
         kullanilacak_usdt = ayarlar['trade_amount'] if ayarlar['trade_mode'] == 'FIXED' else wallet_balance * (ayarlar['trade_amount'] / 100.0)
         toplam_hacim_usdt = kullanilacak_usdt * sinyal['kaldirac']
         
-        # --- GİZEMİ ÇÖZEN KONTAT ÇARPANI (CONTRACT SIZE) MÜDAHALESİ ---
         contract_size = market.get('contractSize', 1)
         if contract_size is None: contract_size = 1
         
-        # 1. Paranın yeteceği gerçek coin adedini hesapla
         hedef_coin_miktari = toplam_hacim_usdt / sinyal['giris']
-        
-        # 2. Adedi borsanın diline (Kontrat Sayısına) çevir!
         kontrat_miktari = hedef_coin_miktari / contract_size
-        
-        # 3. Miktarı borsanın formatına yuvarla
         miktar = borsa.amount_to_precision(sembol, kontrat_miktari)
 
-        # Başlangıçta sadece SL kuruyoruz, TP'leri radar manuel kapatacak
         params = {'stopLossPrice': sinyal['sl'], 'reduceOnly': False}
         emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=sinyal['giris'], params=params)
         return {"durum": "BASARILI", "emir_id": emir['id']}
@@ -69,6 +82,8 @@ async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
+        await borsa.load_markets()
+        hayalet_enjektor(borsa, sembol, coin)
         await borsa.cancel_all_orders(sembol)
     except Exception as e:
         pass
@@ -79,8 +94,11 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
+        await borsa.load_markets()
+        hayalet_enjektor(borsa, sembol, coin)
+        
         oranlar = [float(x) for x in tp_ratios.split(',')]
-        su_anki_hedef_oran = oranlar[asama - 2] # asama 2 = TP1
+        su_anki_hedef_oran = oranlar[asama - 2]
         
         pozisyonlar = await borsa.fetch_positions([sembol])
         if not pozisyonlar: return
@@ -89,13 +107,11 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
         toplam_miktar = float(poz.get('contracts', 0) or poz.get('positionAmt', 0))
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
         
-        # 1. KISMİ KÂR ALMA
         if toplam_miktar > 0 and su_anki_hedef_oran > 0:
             kapatilacak_miktar = borsa.amount_to_precision(sembol, toplam_miktar * (su_anki_hedef_oran / 100))
             await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
             print(f"💸 {coin} için %{su_anki_hedef_oran} kâr satışı yapıldı.")
 
-        # 2. STOP-LOSS TAŞIMA
         if stop_mode != 'NONE':
             yeni_sl = None
             if stop_mode == 'BREAKEVEN' and asama >= 2:
@@ -107,7 +123,7 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
                 elif asama == 5: yeni_sl = fiyatlar['tp3']
 
             if yeni_sl:
-                await borsa.cancel_all_orders(sembol) # Eski stopu siler
+                await borsa.cancel_all_orders(sembol)
                 await borsa.create_order(sembol, 'limit', ters_yon, toplam_miktar, yeni_sl, params={'stopLossPrice': yeni_sl, 'reduceOnly': True})
                 print(f"🛡️ {coin} Stop Loss güncellendi: {yeni_sl} ({stop_mode})")
 
