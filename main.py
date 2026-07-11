@@ -118,7 +118,7 @@ async def sinyal_handler(event):
 async def fiyat_takip_radari():
     borsa_ws = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try: await borsa_ws.load_markets()
-    print("✅ MEXC Piyasa Verileri Radara Yüklendi.")
+    except Exception: pass
     son_db_okuma = 0
     bekleyenler = []
     
