@@ -260,7 +260,7 @@ async def gunluk_pnl_raporlayici():
     while True:
         try:
             su_an = datetime.datetime.now()
-            if su_an.hour == 23 and su_an.minute == 59:
+            if su_an.hour == 20 and su_an.minute == 59:
                 aktif_uyeler = db.get_all_active_users()
                 for uye in aktif_uyeler:
                     stats = db.get_daily_stats(uye['telegram_id'])
