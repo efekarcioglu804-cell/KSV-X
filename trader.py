@@ -8,12 +8,10 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
         await borsa.load_markets()
 
-        # --- GÜVENLİK KAPISI: MİNİMUM LİMİT KONTROLÜ (FİLTRE KALDIRILDI) ---
         market = borsa.market(sembol)
-        # Hata vermesin diye None değerlerini 0 yaptık
+
+        # --- GÜVENLİK KAPISI (FİLTRELER SIFIRLANDI) ---
         min_amount = market['limits']['amount']['min'] if market['limits']['amount']['min'] is not None else 0
-        
-        # Sınırı 0 yaparak botun her işleme denemesini sağladık
         min_cost = 0
         
         acik_pozisyonlar = await borsa.fetch_positions()
@@ -35,14 +33,27 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         except:
             pass
 
-        bakiye = await borsa.fetch_balance()
-        wallet_balance = float(bakiye['total'].get('USDT', 0))
+        # --- GÜVENLİ BAKİYE KONTROLÜ (Sadece Vadeli Cüzdan) ---
+        bakiye = await borsa.fetch_balance({'type': 'swap'})
+        # Boşta duran (free) parayı al, eğer borsa free verisi yollamazsa total parayı al
+        wallet_balance = float(bakiye.get('free', {}).get('USDT', bakiye['total'].get('USDT', 0)))
         if wallet_balance < 2: return {"durum": "HATA", "hata_mesaji": "Bakiye Çok Düşük"}
 
         kullanilacak_usdt = ayarlar['trade_amount'] if ayarlar['trade_mode'] == 'FIXED' else wallet_balance * (ayarlar['trade_amount'] / 100.0)
         toplam_hacim_usdt = kullanilacak_usdt * sinyal['kaldirac']
         
-        miktar = borsa.amount_to_precision(sembol, toplam_hacim_usdt / sinyal['giris'])
+        # --- GİZEMİ ÇÖZEN KONTAT ÇARPANI (CONTRACT SIZE) MÜDAHALESİ ---
+        contract_size = market.get('contractSize', 1)
+        if contract_size is None: contract_size = 1
+        
+        # 1. Paranın yeteceği gerçek coin adedini hesapla
+        hedef_coin_miktari = toplam_hacim_usdt / sinyal['giris']
+        
+        # 2. Adedi borsanın diline (Kontrat Sayısına) çevir!
+        kontrat_miktari = hedef_coin_miktari / contract_size
+        
+        # 3. Miktarı borsanın formatına yuvarla
+        miktar = borsa.amount_to_precision(sembol, kontrat_miktari)
 
         # Başlangıçta sadece SL kuruyoruz, TP'leri radar manuel kapatacak
         params = {'stopLossPrice': sinyal['sl'], 'reduceOnly': False}
