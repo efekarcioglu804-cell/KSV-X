@@ -2,7 +2,7 @@ import asyncio
 import sqlite3
 import time
 import datetime
-import ccxt.async_support as ccxt
+import ccxt.pro as ccxt # ⚡ REST YERİNE WEBSOCKET (PRO) GÜCÜ
 from telethon import TelegramClient, events
 
 import config
@@ -109,156 +109,190 @@ async def sinyal_handler(event):
         except Exception: pass
 
 async def fiyat_takip_radari():
-    borsa = ccxt.mexc()
+    # ⚡ Borsa WebSocket Bağlantısı Kuruluyor
+    borsa_ws = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    son_db_okuma = 0
+    bekleyenler = []
+    
     while True:
         try:
+            su_an = time.time()
+            # Disk/CPU yorulmasın diye Veritabanını en fazla 2 saniyede bir okuruz
+            if su_an - son_db_okuma >= 2:
+                conn = sqlite3.connect(db.DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
+                bekleyenler = cursor.fetchall()
+                conn.close()
+                son_db_okuma = su_an
+            
+            # İçeride hiç açık/bekleyen işlem yoksa WS'yi zorlama, 2 saniye dinlen
+            if not bekleyenler:
+                await asyncio.sleep(2)
+                continue
+
+            sembol_map = {}
+            semboller = []
+            for sinyal in bekleyenler:
+                sembol = sinyal[1].replace('USDT', '') + '/USDT:USDT'
+                semboller.append(sembol)
+                sembol_map[sembol] = sinyal
+            
+            # ⚡ WEBSOCKET DİNLEME (Sadece listemizdeki coinleri milisaniyelik dinleriz)
+            # Timeout ile sarıyoruz ki piyasa durgunken bot kilitlenip sağırlaşmasın
+            try:
+                tickers = await asyncio.wait_for(borsa_ws.watch_tickers(semboller), timeout=2.0)
+            except asyncio.TimeoutError:
+                continue # Sorun yok, işlem olmadı. Döngü başa döner, DB'yi günceller.
+            
+            aktif_uyeler = db.get_all_active_users()
+            degisiklik_var = False
+            
             conn = sqlite3.connect(db.DB_NAME)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
-            bekleyenler = cursor.fetchall()
             
-            if bekleyenler:
-                gorevler = []
-                for sinyal in bekleyenler:
-                    sembol = sinyal[1].replace('USDT', '') + '/USDT:USDT'
-                    gorevler.append(borsa.fetch_ohlcv(sembol, '1m', limit=2))
+            for sembol, ticker in tickers.items():
+                if sembol not in sembol_map: continue
                 
-                mum_sonuclari = await asyncio.gather(*gorevler, return_exceptions=True)
+                # Fiyatın saniyelik güncel hali!
+                fiyat_guncel = ticker.get('last')
+                if not fiyat_guncel: continue
                 
-                for i, sinyal in enumerate(bekleyenler):
-                    s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar = sinyal
-                    mum_verisi = mum_sonuclari[i]
-                    
-                    if isinstance(mum_verisi, Exception) or not mum_verisi: continue 
-                    
-                    katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
-                    son_mum = mum_verisi[-1]
-                    fiyat_high, fiyat_low = son_mum[2], son_mum[3]
-                    yeni_durum, yeni_asama, bildirim = None, None, None
-                    
-                    aktif_uyeler = db.get_all_active_users()
-                    
-                    if durum == 'BEKLIYOR':
-                        gecen_sure = time.time() - (eklenme_zamani or time.time())
-                        if gecen_sure > (8 * 3600):
-                            yeni_durum = 'ZAMAN_ASIMI'
-                            bildirim = f"⏳ **ZAMAN AŞIMI (8 SAAT)** ⏳\n#{coin} operasyonu iptal edildi."
-                            for uye in aktif_uyeler:
-                                if str(uye['telegram_id']) in katilanlar_listesi:
-                                    client.loop.create_task(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
-                        elif (yon == 'LONG' and fiyat_low <= giris) or (yon == 'SHORT' and fiyat_high >= giris):
-                            yeni_durum, yeni_asama = 'ISLEMDE', 1
-                            bildirim = f"🟢 **İŞLEME GİRİLDİ**\n#{coin} {yon} | {giris} 🚀"
-                    
-                    elif durum == 'ISLEMDE':
-                        # 1. KULLANICIYA ÖZEL KİŞİSEL STOP KONTROLÜ (Spam Kırıcı ve İz Süren Sistem)
+                fiyat_high = fiyat_guncel
+                fiyat_low = fiyat_guncel
+                
+                sinyal = sembol_map[sembol]
+                s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar = sinyal
+                katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
+                yeni_durum, yeni_asama, bildirim = None, None, None
+
+                if durum == 'BEKLIYOR':
+                    gecen_sure = time.time() - (eklenme_zamani or time.time())
+                    if gecen_sure > (8 * 3600):
+                        yeni_durum = 'ZAMAN_ASIMI'
+                        bildirim = f"⏳ **ZAMAN AŞIMI (8 SAAT)** ⏳\n#{coin} operasyonu iptal edildi."
                         for uye in aktif_uyeler:
-                            tid_str = str(uye['telegram_id'])
-                            if tid_str in katilanlar_listesi:
-                                kullanici_stop = sl
-                                stop_tipi = "ORIJINAL"
+                            if str(uye['telegram_id']) in katilanlar_listesi:
+                                client.loop.create_task(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
+                    elif (yon == 'LONG' and fiyat_low <= giris) or (yon == 'SHORT' and fiyat_high >= giris):
+                        yeni_durum, yeni_asama = 'ISLEMDE', 1
+                        bildirim = f"🟢 **İŞLEME GİRİLDİ**\n#{coin} {yon} | {giris} 🚀"
+                
+                elif durum == 'ISLEMDE':
+                    # 1. KULLANICIYA ÖZEL KİŞİSEL STOP KONTROLÜ
+                    for uye in aktif_uyeler:
+                        tid_str = str(uye['telegram_id'])
+                        if tid_str in katilanlar_listesi:
+                            kullanici_stop = sl
+                            stop_tipi = "ORIJINAL"
+                            
+                            if uye['stop_mode'] == 'BREAKEVEN' and asama >= 2:
+                                kullanici_stop, stop_tipi = giris, "BREAK_EVEN"
+                            elif uye['stop_mode'] == 'MOVING':
+                                if asama == 2: kullanici_stop, stop_tipi = giris, "BREAK_EVEN"
+                                elif asama == 3: kullanici_stop, stop_tipi = tp1, "MOVING_TP1"
+                                elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
+                                elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
+
+                            # %0.3 Mark Price (Slippage) Toleransı (Görünmez stopları engeller)
+                            esneme_payi = 0.003
+                            if yon == 'LONG':
+                                stop_vuruldu = fiyat_low <= (kullanici_stop * (1 + esneme_payi))
+                            else:
+                                stop_vuruldu = fiyat_high >= (kullanici_stop * (1 - esneme_payi))
+
+                            if stop_vuruldu:
+                                katilanlar_listesi.remove(tid_str)
+                                yeni_kat_str = ",".join(katilanlar_listesi)
+                                cursor.execute("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (yeni_kat_str, s_id))
+                                degisiklik_var = True
                                 
-                                if uye['stop_mode'] == 'BREAKEVEN' and asama >= 2:
-                                    kullanici_stop, stop_tipi = giris, "BREAK_EVEN"
-                                elif uye['stop_mode'] == 'MOVING':
-                                    if asama == 2: kullanici_stop, stop_tipi = giris, "BREAK_EVEN"
-                                    elif asama == 3: kullanici_stop, stop_tipi = tp1, "MOVING_TP1"
-                                    elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
-                                    elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
-
-                                # Fiyat kullanıcının kişisel stop çizgisine çarptı mı? (Mark Price %0.3 Toleranslı)
-                                esneme_payi = 0.003
-                                if yon == 'LONG':
-                                    stop_vuruldu = fiyat_low <= (kullanici_stop * (1 + esneme_payi))
-                                else:
-                                    stop_vuruldu = fiyat_high >= (kullanici_stop * (1 - esneme_payi))
-
-                                if stop_vuruldu:
-                                    # SPAM ENGELLEYİCİ: Kullanıcıyı aktifler listesinden sil
-                                    katilanlar_listesi.remove(tid_str)
-                                    yeni_kat_str = ",".join(katilanlar_listesi)
-                                    cursor.execute("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (yeni_kat_str, s_id))
-                                    conn.commit()
-                                    
-                                    if stop_tipi == "ORIJINAL":
-                                        oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
-                                        kalan_oran = 100.0 if asama < 2 else (100.0 - sum(oranlar[:asama-1]))
-                                        zarar_yuzdesi = (abs(sl - giris) / giris) * 20 * (kalan_oran / 100.0)
-                                        zarar_degeri = uye['trade_amount'] * zarar_yuzdesi if uye['trade_mode'] == 'FIXED' else zarar_yuzdesi
-                                        db.update_daily_stat(uye['telegram_id'], 'stop', value=1, profit=-zarar_degeri)
-                                        dm_msg = f"🚨 **#{coin} Orijinal Stop Loss.**\nKalan pozisyon zararla kapatıldı. 🛡️"
-                                        
-                                    elif stop_tipi == "BREAK_EVEN":
-                                        db.update_daily_stat(uye['telegram_id'], 'stop', value=1, profit=0.0)
-                                        dm_msg = f"🛡️ **#{coin} İşlemi Giriş Fiyatından Kapatıldı (Break-Even)!**\nSıfır riskle, güvende ayrıldık. 💸"
-                                        
-                                    elif stop_tipi.startswith("MOVING"):
-                                        oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
-                                        kalan_oran = 100.0 - sum(oranlar[:asama-1])
-                                        kar_yuzdesi = (abs(kullanici_stop - giris) / giris) * 20 * (kalan_oran / 100.0)
-                                        kar_degeri = uye['trade_amount'] * kar_yuzdesi if uye['trade_mode'] == 'FIXED' else kar_yuzdesi
-                                        db.update_daily_stat(uye['telegram_id'], 'tp', value=1, profit=kar_degeri)
-                                        dm_msg = f"🛡️ **#{coin} İz Süren (MOVING) Stop Patladı!**\nFiyat geriye döndü ama stopumuz {kullanici_stop} seviyesindeydi. Kalan pozisyon KÂRLA kapatıldı! 📈"
-
-                                    try: await client.send_message(uye['telegram_id'], dm_msg)
-                                    except: pass
-
-                        # 2. GLOBAL KAPANIŞ (Herkes orijinal stop olursa veya liste boşalırsa)
-                        if (yon == 'LONG' and fiyat_low <= sl) or (yon == 'SHORT' and fiyat_high >= sl):
-                            yeni_durum = 'STOP_OLDU'
-                            bildirim = f"🛡 **STOP PATLADI** | #{coin}"
-                        else:
-                            # HEDEFLER
-                            if asama < 2 and ((yon == 'LONG' and fiyat_high >= tp1) or (yon == 'SHORT' and fiyat_low <= tp1)):
-                                yeni_asama = 2
-                                bildirim = f"🎯 **TP1 VURULDU!** | #{coin}"
-                            elif asama < 3 and ((yon == 'LONG' and fiyat_high >= tp2) or (yon == 'SHORT' and fiyat_low <= tp2)):
-                                yeni_asama = 3
-                                bildirim = f"🎯🎯 **TP2 VURULDU!** | #{coin}"
-                            elif asama < 4 and ((yon == 'LONG' and fiyat_high >= tp3) or (yon == 'SHORT' and fiyat_low <= tp3)):
-                                yeni_asama = 4
-                                bildirim = f"🎯🎯🎯 **TP3 VURULDU!** | #{coin}"
-                            elif asama < 5 and ((yon == 'LONG' and fiyat_high >= tp4) or (yon == 'SHORT' and fiyat_low <= tp4)):
-                                yeni_asama, yeni_durum = 5, 'FULL_TP'
-                                bildirim = f"👑 **FULL TP (TÜM HEDEFLER)** 👑\n#{coin} operasyonu tamamlandı!"
-
-                    if yeni_durum or yeni_asama:
-                        cursor.execute("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id))
-                        conn.commit()
-                        if bildirim: await client.send_message(VIP_KANAL_ID, bildirim)
-                        
-                        if yeni_asama and yeni_asama >= 2:
-                            fiyatlar = {'giris': giris, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3}
-                            for uye in aktif_uyeler:
-                                if str(uye['telegram_id']) in katilanlar_listesi:
-                                    client.loop.create_task(pozisyon_guncelle(
-                                        uye['mexc_api_key'], uye['mexc_api_secret'], 
-                                        coin, yon, yeni_asama, uye['tp_ratios'], uye['stop_mode'], fiyatlar
-                                    ))
-                                    
+                                if stop_tipi == "ORIJINAL":
                                     oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
-                                    mevcut_satilan_oran = oranlar[yeni_asama - 2]
-                                    hedef_fiyat = tp1 if yeni_asama == 2 else (tp2 if yeni_asama == 3 else (tp3 if yeni_asama == 4 else tp4))
-                                    kar_yuzdesi = (abs(hedef_fiyat - giris) / giris) * 20 * (mevcut_satilan_oran / 100.0)
+                                    kalan_oran = 100.0 if asama < 2 else (100.0 - sum(oranlar[:asama-1]))
+                                    zarar_yuzdesi = (abs(sl - giris) / giris) * 20 * (kalan_oran / 100.0)
+                                    zarar_degeri = uye['trade_amount'] * zarar_yuzdesi if uye['trade_mode'] == 'FIXED' else zarar_yuzdesi
+                                    db.update_daily_stat(uye['telegram_id'], 'stop', value=1, profit=-zarar_degeri)
+                                    dm_msg = f"🚨 **#{coin} Orijinal Stop Loss.**\nKalan pozisyon zararla kapatıldı. 🛡️"
+                                    
+                                elif stop_tipi == "BREAK_EVEN":
+                                    db.update_daily_stat(uye['telegram_id'], 'stop', value=1, profit=0.0)
+                                    dm_msg = f"🛡️ **#{coin} İşlemi Giriş Fiyatından Kapatıldı (Break-Even)!**\nSıfır riskle, güvende ayrıldık. 💸"
+                                    
+                                elif stop_tipi.startswith("MOVING"):
+                                    oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
+                                    kalan_oran = 100.0 - sum(oranlar[:asama-1])
+                                    kar_yuzdesi = (abs(kullanici_stop - giris) / giris) * 20 * (kalan_oran / 100.0)
                                     kar_degeri = uye['trade_amount'] * kar_yuzdesi if uye['trade_mode'] == 'FIXED' else kar_yuzdesi
-                                    
                                     db.update_daily_stat(uye['telegram_id'], 'tp', value=1, profit=kar_degeri)
+                                    dm_msg = f"🛡️ **#{coin} İz Süren (MOVING) Stop Patladı!**\nFiyat geriye döndü ama stopumuz {kullanici_stop} seviyesindeydi. Kalan pozisyon KÂRLA kapatıldı! 📈"
+
+                                try: await client.send_message(uye['telegram_id'], dm_msg)
+                                except: pass
+
+                    # 2. GLOBAL KAPANIŞ
+                    if (yon == 'LONG' and fiyat_low <= sl) or (yon == 'SHORT' and fiyat_high >= sl):
+                        yeni_durum = 'STOP_OLDU'
+                        bildirim = f"🛡 **STOP PATLADI** | #{coin}"
+                    else:
+                        # HEDEFLER
+                        if asama < 2 and ((yon == 'LONG' and fiyat_high >= tp1) or (yon == 'SHORT' and fiyat_low <= tp1)):
+                            yeni_asama = 2
+                            bildirim = f"🎯 **TP1 VURULDU!** | #{coin}"
+                        elif asama < 3 and ((yon == 'LONG' and fiyat_high >= tp2) or (yon == 'SHORT' and fiyat_low <= tp2)):
+                            yeni_asama = 3
+                            bildirim = f"🎯🎯 **TP2 VURULDU!** | #{coin}"
+                        elif asama < 4 and ((yon == 'LONG' and fiyat_high >= tp3) or (yon == 'SHORT' and fiyat_low <= tp3)):
+                            yeni_asama = 4
+                            bildirim = f"🎯🎯🎯 **TP3 VURULDU!** | #{coin}"
+                        elif asama < 5 and ((yon == 'LONG' and fiyat_high >= tp4) or (yon == 'SHORT' and fiyat_low <= tp4)):
+                            yeni_asama, yeni_durum = 5, 'FULL_TP'
+                            bildirim = f"👑 **FULL TP (TÜM HEDEFLER)** 👑\n#{coin} operasyonu tamamlandı!"
+
+                if yeni_durum or yeni_asama:
+                    cursor.execute("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id))
+                    degisiklik_var = True
+                    if bildirim: await client.send_message(VIP_KANAL_ID, bildirim)
+                    
+                    if yeni_asama and yeni_asama >= 2:
+                        fiyatlar = {'giris': giris, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3}
+                        for uye in aktif_uyeler:
+                            if str(uye['telegram_id']) in katilanlar_listesi:
+                                client.loop.create_task(pozisyon_guncelle(
+                                    uye['mexc_api_key'], uye['mexc_api_secret'], 
+                                    coin, yon, yeni_asama, uye['tp_ratios'], uye['stop_mode'], fiyatlar
+                                ))
+                                
+                                oranlar = [float(x) for x in uye['tp_ratios'].split(',')]
+                                mevcut_satilan_oran = oranlar[yeni_asama - 2]
+                                hedef_fiyat = tp1 if yeni_asama == 2 else (tp2 if yeni_asama == 3 else (tp3 if yeni_asama == 4 else tp4))
+                                kar_yuzdesi = (abs(hedef_fiyat - giris) / giris) * 20 * (mevcut_satilan_oran / 100.0)
+                                kar_degeri = uye['trade_amount'] * kar_yuzdesi if uye['trade_mode'] == 'FIXED' else kar_yuzdesi
+                                
+                                db.update_daily_stat(uye['telegram_id'], 'tp', value=1, profit=kar_degeri)
+                                
+                                dm_msg = f"🎯 **#{coin} HEDEF {yeni_asama - 1} VURULDU!**\n"
+                                if yeni_asama == 2 and uye['stop_mode'] in ['BREAKEVEN', 'MOVING']:
+                                    dm_msg += f"🛡️ İşleminin %{mevcut_satilan_oran} kadarı satıldı, Stop giriş fiyatına çekildi! 🚀"
+                                elif yeni_asama > 2 and uye['stop_mode'] == 'MOVING':
+                                    dm_msg += f"📈 İşleminin %{mevcut_satilan_oran} kadarı daha satıldı, iz süren stop yukarı taşındı! 🔥"
+                                else:
+                                    dm_msg += f"💸 İşleminin %{mevcut_satilan_oran} kadarı kârla kapatıldı! 🦁"
                                     
-                                    dm_msg = f"🎯 **#{coin} HEDEF {yeni_asama - 1} VURULDU!**\n"
-                                    if yeni_asama == 2 and uye['stop_mode'] in ['BREAKEVEN', 'MOVING']:
-                                        dm_msg += f"🛡️ İşleminin %{mevcut_satilan_oran} kadarı satıldı, Stop giriş fiyatına çekildi! 🚀"
-                                    elif yeni_asama > 2 and uye['stop_mode'] == 'MOVING':
-                                        dm_msg += f"📈 İşleminin %{mevcut_satilan_oran} kadarı daha satıldı, iz süren stop yukarı taşındı! 🔥"
-                                    else:
-                                        dm_msg += f"💸 İşleminin %{mevcut_satilan_oran} kadarı kârla kapatıldı! 🦁"
-                                        
-                                    try: await client.send_message(uye['telegram_id'], dm_msg)
-                                    except: pass
-            conn.close()
-        except Exception as e:
-            print(f"Radar: {e}")
+                                try: await client.send_message(uye['telegram_id'], dm_msg)
+                                except: pass
             
-        await asyncio.sleep(1)
+            if degisiklik_var:
+                conn.commit()
+            conn.close()
+            
+        except ccxt.NetworkError as e:
+            # WebSocket bir anlığına koparsa bot çökmez, 2 saniye dinlenip yeniden bağlanır
+            print(f"WS Ağ Hatası (Diriltiliyor...): {e}")
+            await asyncio.sleep(2)
+        except Exception as e:
+            print(f"Radar Kritik Hata: {e}")
+            await asyncio.sleep(2)
 
 async def gunluk_pnl_raporlayici():
     while True:
@@ -296,7 +330,7 @@ async def main():
     print("🤖 KSVİX VIP Telegram'a Sızdı.")
     client.loop.create_task(fiyat_takip_radari())
     client.loop.create_task(gunluk_pnl_raporlayici()) 
-    print("🦅 V8 Radarları ve Muhasebe Motoru Aktif...")
+    print("🦅 V8 Radarları (WebSocket) ve Muhasebe Motoru Aktif...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
