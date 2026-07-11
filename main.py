@@ -166,8 +166,12 @@ async def fiyat_takip_radari():
                                     elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
                                     elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
 
-                                # Fiyat kullanıcının kişisel stop çizgisine çarptı mı?
-                                stop_vuruldu = (yon == 'LONG' and fiyat_low <= kullanici_stop) or (yon == 'SHORT' and fiyat_high >= kullanici_stop)
+                                # Fiyat kullanıcının kişisel stop çizgisine çarptı mı? (Mark Price %0.3 Toleranslı)
+                                esneme_payi = 0.003
+                                if yon == 'LONG':
+                                    stop_vuruldu = fiyat_low <= (kullanici_stop * (1 + esneme_payi))
+                                else:
+                                    stop_vuruldu = fiyat_high >= (kullanici_stop * (1 - esneme_payi))
 
                                 if stop_vuruldu:
                                     # SPAM ENGELLEYİCİ: Kullanıcıyı aktifler listesinden sil
