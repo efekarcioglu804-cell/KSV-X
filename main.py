@@ -63,7 +63,8 @@ async def genel_handler(event):
                 
                 menu_msg = (
                     "✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅\n\n"
-                    "İşte KSVİX'i yöneteceğin komut paneli:\n\n"
+                    "Bütün operasyon yetkisi devralındı. Kasanız emin ellerde ve sistem tam otomatik avlanma modunda.\n\n"
+                    "İşte KSVİX'i yöneteceğiniz komut paneli:\n\n"
                     "⚙️ **TEMEL AYARLAR**\n"
                     "🔹 `/ayar [MOD] [MİKTAR] [MAX_İŞLEM]`\n"
                     "   *Modlar:* `PERCENT` (Kasa yüzdesi) veya `FIXED` (Sabit USDT)\n"
@@ -80,8 +81,7 @@ async def genel_handler(event):
                     "   *Örnek:* `/stop MOVING`\n\n"
                     "🛑 **MOTOR KONTROLÜ**\n"
                     "🔹 `/durdur` - *Botu uyku moduna alır (Yeni sinyallere girmez).* \n"
-                    "🔹 `/devam` - *Kalkanları indirir, tekrar avlanmaya başlar.* \n\n"
-                    "⚔️ *Gelecek senin, makine benim kontrolümde. Vur kırbacı!*"
+                    "🔹 `/devam` - *Kalkanları indirir, tekrar avlanmaya başlar.*"
                 )
                 await event.reply(menu_msg)
             except: 
@@ -316,7 +316,13 @@ async def fiyat_takip_radari():
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
                     if bildirim: vip_mesajlar.append(bildirim)
 
-                    if yeni_asama and yeni_asama > asama:
+                    # 👑 KRALIN EMRİ: İŞLEME GİRİLDİĞİ AN DM'DEN BİLDİRİM AT!
+                    if yeni_durum == 'ISLEMDE' and durum == 'BEKLIYOR':
+                        for uye in aktif_uyeler:
+                            if str(uye['telegram_id']) in katilanlar_listesi:
+                                dm_mesajlar.append((uye['telegram_id'], f"🟢 **#{coin} İşleme Girildi!**\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris}\n🦅 KSVİX pusudan çıktı, operasyon başladı!"))
+
+                    if yeni_asama and yeni_asama > asama and yeni_asama >= 2:
                         tp_fiyatlar = {1: tp1, 2: tp2, 3: tp3, 4: tp4}
                         vurulan_tp = yeni_asama - 1
                         hedef_fiyat = tp_fiyatlar.get(vurulan_tp, tp1)
