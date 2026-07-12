@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 import time
 import datetime
+import math
 import ccxt.pro as ccxt 
 from telethon import TelegramClient, events
 
@@ -80,6 +81,41 @@ async def genel_handler(event):
             print(f"🚀 [VIP KANAL] Sinyal yakalandı: {mesaj}")
             sinyal = parse_signal(mesaj)
             if not sinyal: return
+
+            # 🧠 KRALIN DEKODERİ (MEME COIN ÖLÇEKLEYİCİ)
+            borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+            try:
+                sembol_tmp = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
+                await borsa_tmp.load_markets()
+                hayalet_enjektor(borsa_tmp, sembol_tmp, sinyal['coin'])
+                ticker = await borsa_tmp.fetch_ticker(sembol_tmp)
+                fiyat_mexc = float(ticker['last'])
+                giris_fiyati = float(sinyal['giris'])
+                
+                if fiyat_mexc > 0 and giris_fiyati > 0:
+                    oran = giris_fiyati / fiyat_mexc
+                    if oran > 5: # Sinyal fiyatı çok büyük (100000FLOKI durumu)
+                        carpan = 10 ** round(math.log10(oran))
+                        sinyal['giris'] /= carpan
+                        sinyal['tp1'] /= carpan
+                        sinyal['tp2'] /= carpan
+                        sinyal['tp3'] /= carpan
+                        sinyal['tp4'] /= carpan
+                        sinyal['sl'] /= carpan
+                        print(f"🔧 Ölçek Küçültüldü! Çarpan: /{carpan} | Yeni Giriş: {sinyal['giris']}")
+                    elif oran < 0.2: # Sinyal fiyatı çok küçük
+                        carpan = 10 ** round(math.log10(1/oran))
+                        sinyal['giris'] *= carpan
+                        sinyal['tp1'] *= carpan
+                        sinyal['tp2'] *= carpan
+                        sinyal['tp3'] *= carpan
+                        sinyal['tp4'] *= carpan
+                        sinyal['sl'] *= carpan
+                        print(f"🔧 Ölçek Büyütüldü! Çarpan: x{carpan} | Yeni Giriş: {sinyal['giris']}")
+            except Exception as e:
+                print(f"Ölçekleyici hatası: {e}")
+            finally:
+                await borsa_tmp.close()
                 
             signal_id = db.sinyal_kaydet(
                 sinyal['coin'], sinyal['yon'], sinyal['giris'], 
@@ -163,9 +199,10 @@ async def fiyat_takip_radari():
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
                     
+                    # Dekoder başarısız olursa diye son kalkanı tutuyoruz, ama %99.9 devreye girmeyecek!
                     if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
                         yeni_durum = 'IPTAL'
-                        bildirim = f"⚠️ **ÖLÇEK UYUŞMAZLIĞI (Sistem Koruması)** ⚠️\n#{coin} işlemi iptal edildi!\nSinyal Fiyatı: `{giris}`\nMEXC Fiyatı: `{fiyat_last}`\n*(Muhtemel 1000x / 100000x Ticker Farkı)*"
+                        bildirim = f"⚠️ **ÖLÇEK UYUŞMAZLIĞI (Sistem Koruması)** ⚠️\n#{coin} işlemi iptal edildi!\nSinyal Fiyatı: `{giris}`\nMEXC Fiyatı: `{fiyat_last}`"
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
@@ -241,7 +278,6 @@ async def fiyat_takip_radari():
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
                     if bildirim: vip_mesajlar.append(bildirim)
 
-                    # 👑 KRALIN EMRİ: TP Geldiğinde Özelden (DM) Bildirim At
                     if yeni_asama and yeni_asama > asama:
                         tp_fiyatlar = {1: tp1, 2: tp2, 3: tp3, 4: tp4}
                         vurulan_tp = yeni_asama - 1
