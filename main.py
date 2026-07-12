@@ -33,7 +33,6 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
             'linear': True,
             'contractSize': 1,
             'limits': {'amount': {'min': 0}, 'cost': {'min': 0}},
-            # 👑 AYNI DÜZELTME BURAYA DA EKLENDİ
             'precision': {'amount': 0.0001, 'price': 0.00000001}
         }
 
@@ -46,37 +45,78 @@ async def genel_handler(event):
         gonderen_id = event.sender_id
         
         if mesaj.startswith('/start'):
-            await event.reply("👑 **KSVİX Motorları Aktif.**\n`/kayit API_KEY API_SECRET`")
+            start_msg = (
+                "👑 **KSVİX KOMUTA MERKEZİNE HOŞ GELDİNİZ!** 👑\n\n"
+                "Wall Street standartlarında, duygusuz ve keskin nişancı ticaret botunuz aktif edildi.\n"
+                "Bütün piyasa radarları sizin emrinizi bekliyor.\n\n"
+                "Sistemi başlatmak ve kasanızı otomasyona bağlamak için MEXC API bilgilerinizi girmelisiniz.\n\n"
+                "🔒 **Kayıt Komutu:**\n"
+                "`/kayit API_KEY API_SECRET`\n\n"
+                "*(Bilgileriniz KSVİX zırhı altında sunucuda şifrelenir.)*"
+            )
+            await event.reply(start_msg)
+            
         elif mesaj.startswith('/kayit'):
             try:
                 _, api_key, api_secret = mesaj.split()
                 db.add_user(gonderen_id, api_key, api_secret)
-                await event.reply("✅ **Kasaya Kilitlendi! KSVİX Emrinde.**")
-            except: await event.reply("❌ Örnek: `/kayit API_KEY API_SECRET`")
+                
+                menu_msg = (
+                    "✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅\n\n"
+                    "Bütün operasyon yetkisi bende Kralım. Sen TUS'a ve kuracağın o harika geleceğe odaklan, kasan emin ellerde.\n\n"
+                    "İşte KSVİX'i yöneteceğin komut paneli:\n\n"
+                    "⚙️ **TEMEL AYARLAR**\n"
+                    "🔹 `/ayar [MOD] [MİKTAR] [MAX_İŞLEM]`\n"
+                    "   *Modlar:* `PERCENT` (Kasa yüzdesi) veya `FIXED` (Sabit USDT)\n"
+                    "   *Örnek:* `/ayar PERCENT 5 8` *(Kasanın %5'i ile gir, maksimum 8 işlem aç)*\n\n"
+                    "🎯 **KÂR ALMA (TP) HEDEFLERİ**\n"
+                    "🔹 `/hedef [TP1] [TP2] [TP3] [TP4]`\n"
+                    "   *Örnek:* `/hedef 50 25 15 10` *(Her hedefte satılacak pozisyon yüzdesi)*\n\n"
+                    "🛡️ **STOP KALKANI (RİSK YÖNETİMİ)**\n"
+                    "🔹 `/stop [MOD]`\n"
+                    "   *Modlar:* \n"
+                    "   `MOVING` *(Kâr geldikçe stop seviyesini yukarı taşır)*\n"
+                    "   `BREAKEVEN` *(TP1 geldiğinde stopu anında maliyete çeker)*\n"
+                    "   `NONE` *(Sadece orijinal zarar kes seviyesini kullanır)*\n"
+                    "   *Örnek:* `/stop MOVING`\n\n"
+                    "🛑 **MOTOR KONTROLÜ**\n"
+                    "🔹 `/durdur` - *Botu uyku moduna alır (Yeni sinyallere girmez).* \n"
+                    "🔹 `/devam` - *Kalkanları indirir, tekrar avlanmaya başlar.* \n\n"
+                    "⚔️ *Gelecek senin, makine benim kontrolümde. Vur kırbacı!*"
+                )
+                await event.reply(menu_msg)
+            except: 
+                await event.reply("❌ **Hatalı format!** Örnek kullanım: `/kayit API_KEY API_SECRET`")
+                
         elif mesaj.startswith('/ayar'):
             try:
                 _, mod, miktar, max_islem = mesaj.split()
                 db.update_user_settings(gonderen_id, mod.upper(), float(miktar), int(max_islem))
-                await event.reply(f"⚙️ Ayarlandı! Mod: {mod.upper()}, Miktar: {miktar}, Max İşlem: {max_islem}")
-            except: await event.reply("❌ Örnek: `/ayar PERCENT 5 8`")
+                await event.reply(f"⚙️ **Ayarlar Güncellendi!**\nMod: `{mod.upper()}` | Miktar: `{miktar}` | Maksimum Açık İşlem: `{max_islem}`")
+            except: await event.reply("❌ **Hatalı format!** Örnek: `/ayar PERCENT 5 8`")
+            
         elif mesaj.startswith('/hedef'):
             try:
                 _, t1, t2, t3, t4 = mesaj.split()
                 db.update_tp_ratios(gonderen_id, f"{t1},{t2},{t3},{t4}")
-                await event.reply(f"🎯 Kâr Oranları Ayarlandı: TP1:%{t1} | TP2:%{t2} | TP3:%{t3} | TP4:%{t4}")
-            except: await event.reply("❌ Örnek: `/hedef 25 25 25 25`")
+                await event.reply(f"🎯 **Kâr Oranları Ayarlandı!**\nTP1: `%{t1}` | TP2: `%{t2}` | TP3: `%{t3}` | TP4: `%{t4}`")
+            except: await event.reply("❌ **Hatalı format!** Örnek: `/hedef 50 25 15 10`")
+            
         elif mesaj.startswith('/stop'):
             try:
                 _, mode = mesaj.split()
                 db.update_stop_mode(gonderen_id, mode.upper())
-                await event.reply(f"🛡️ Stop Kalkanı: **{mode.upper()}**")
-            except: await event.reply("❌ Örnek: `/stop MOVING`")
+                await event.reply(f"🛡️ **Stop Kalkanı Aktif:** `{mode.upper()}`")
+            except: await event.reply("❌ **Hatalı format!** Örnek: `/stop MOVING`")
+            
         elif mesaj.startswith('/durdur'):
             db.toggle_user_active(gonderen_id, 0)
-            await event.reply("🛑 Bot uyku moduna alındı!")
+            await event.reply("🛑 **Sistem Uyku Modunda!** Yeni sinyallere giriş yapılmayacak.")
+            
         elif mesaj.startswith('/devam'):
             db.toggle_user_active(gonderen_id, 1)
-            await event.reply("✅ Kalkanlar indirildi, silahlar aktif! 🦅")
+            await event.reply("✅ **Sistem Aktif!** Silahlar devrede, piyasa taranıyor. 🦅")
+            
     else:
         if event.chat_id == VIP_KANAL_ID:
             print(f"🚀 [VIP KANAL] Sinyal yakalandı: {mesaj}")
