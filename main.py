@@ -8,7 +8,7 @@ from telethon import TelegramClient, events
 import config
 import database as db
 from parser import parse_signal
-from trader import islem_ac, bekleyen_emri_iptal_et, pozisyon_guncelle
+from trader import islem_ac, bekleyen_emri_iptal_et, pozisyon_guncelle, acil_kapat
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -104,6 +104,10 @@ async def genel_handler(event):
                     db.update_daily_stat(telegram_id, 'open', value=1)
                     try: await client.send_message(telegram_id, f"✅ **#{sinyal['coin']} Sinyali Alındı!**\nPusudayız. 🦅")
                     except: pass
+                else:
+                    hata_nedeni = sonuc.get('hata_mesaji', 'Bilinmiyor')
+                    try: await client.send_message(telegram_id, f"⚠️ **#{sinyal['coin']} Pas Geçildi!**\n🛑 **Sebep:** `{hata_nedeni}`")
+                    except: pass
 
 async def fiyat_takip_radari():
     borsa_ws = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -158,13 +162,23 @@ async def fiyat_takip_radari():
 
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
-                    # 1. YARA KAPATILDI: 8 Saat kuralı (İşlem girmezse silinir)
-                    if gecen_sure > (8 * 3600):
+                    
+                    # 🛡️ KRALIN ÖLÇEK KALKANI (Meme Coin Yanılsamasını Engeller)
+                    # Eğer fiyatlar arasında 5 kattan fazla fark varsa, ticker uyumsuzdur (1000PEPE, 100000FLOKI gibi)
+                    if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
+                        yeni_durum = 'IPTAL'
+                        bildirim = f"⚠️ **ÖLÇEK UYUŞMAZLIĞI (Sistem Koruması)** ⚠️\n#{coin} işlemi iptal edildi!\nSinyal Fiyatı: `{giris}`\nMEXC Fiyatı: `{fiyat_last}`\n*(Muhtemel 1000x / 100000x Ticker Farkı)*"
+                        for uye in aktif_uyeler:
+                            if str(uye['telegram_id']) in katilanlar_listesi:
+                                mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
+                    
+                    elif gecen_sure > (8 * 3600):
                         yeni_durum = 'ZAMAN_ASIMI'
                         bildirim = f"⏳ **ZAMAN AŞIMI (8 SAAT)** ⏳\n#{coin} operasyonu giriş bölgesine ulaşamadığı için iptal edildi."
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
+                    
                     elif (yon == 'LONG' and fiyat_last <= giris) or (yon == 'SHORT' and fiyat_last >= giris):
                         yeni_durum, yeni_asama = 'ISLEMDE', 1
                         bildirim = f"🟢 **İŞLEME GİRİLDİ** | #{coin}\n⚡ **Yön:** {yon} | **Giriş:** {giris} 🚀"
@@ -184,6 +198,8 @@ async def fiyat_takip_radari():
                             if (yon == 'LONG' and fiyat_mark <= kullanici_stop) or (yon == 'SHORT' and fiyat_mark >= kullanici_stop):
                                 katilanlar_listesi.remove(tid_str)
                                 db_guncellemeler.append(("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (",".join(katilanlar_listesi), s_id)))
+                                
+                                mexc_gorevleri.append(acil_kapat(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon))
                                 
                                 roe = (abs(kullanici_stop - giris) / giris) * kaldirac * 100
                                 if stop_tipi == "ORIJINAL": 
@@ -218,12 +234,16 @@ async def fiyat_takip_radari():
                             yeni_asama, yeni_durum = 5, 'FULL_TP'
                             roe = (abs(tp4 - giris) / giris) * kaldirac * 100
                             bildirim = f"👑 **FULL TP** | #{coin}\n🤑 **Maksimum Kâr:** `+{roe:.2f}%` ({kaldirac}x ROE) 🥂"
+                            
+                            for uye in aktif_uyeler:
+                                if str(uye['telegram_id']) in katilanlar_listesi:
+                                    mexc_gorevleri.append(acil_kapat(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon))
 
                 if yeni_durum or yeni_asama:
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
                     if bildirim: vip_mesajlar.append(bildirim)
 
-                    if yeni_asama and yeni_asama >= 2:
+                    if yeni_asama and yeni_asama >= 2 and yeni_asama < 5:
                         fiyatlar = {'giris': giris, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3}
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
@@ -234,7 +254,6 @@ async def fiyat_takip_radari():
                                     )
                                 )
                 
-                # ZOMBİ SİNYAL TEMİZLİĞİ: Eğer herkes işlemden çıkmışsa veya stop olmuşsa sistemi meşgul etmez
                 elif durum == 'ISLEMDE' and not katilanlar_listesi:
                      db_guncellemeler.append(("UPDATE active_signals SET durum = 'KAPANDI' WHERE id = ?", (s_id,)))
 
