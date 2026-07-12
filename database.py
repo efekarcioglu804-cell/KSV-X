@@ -48,12 +48,10 @@ def init_db():
         )
     ''')
     
+    # Yeni Güncellemeler (Katılanlar Listesi)
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
     except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
-    except: pass
-    # YENİ EKLENTİ: Break-Even sayacı için ayrı sütun
-    try: cursor.execute("ALTER TABLE user_daily_stats ADD COLUMN be_adet INTEGER DEFAULT 0")
     except: pass
     
     conn.commit()
@@ -119,7 +117,7 @@ def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl):
         INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, eklenme_zamani) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?)
     ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, su_an))
-    signal_id = cursor.lastrowid
+    signal_id = cursor.lastrowid # Sinyalin ID'sini döndür
     conn.commit()
     conn.close()
     return signal_id
@@ -142,20 +140,18 @@ def update_daily_stat(telegram_id, stat_type, value=1, profit=0.0):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO user_daily_stats (telegram_id, tarih, acilan_islem, tp_adet, stop_adet, be_adet, kar_usdt)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO user_daily_stats (telegram_id, tarih, acilan_islem, tp_adet, stop_adet, kar_usdt)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(telegram_id, tarih) DO UPDATE SET
             acilan_islem = acilan_islem + excluded.acilan_islem,
             tp_adet = tp_adet + excluded.tp_adet,
             stop_adet = stop_adet + excluded.stop_adet,
-            be_adet = be_adet + excluded.be_adet,
             kar_usdt = kar_usdt + excluded.kar_usdt
     ''', (
         telegram_id, tarih, 
         value if stat_type == 'open' else 0,
         value if stat_type == 'tp' else 0,
         value if stat_type == 'stop' else 0,
-        value if stat_type == 'be' else 0, # YENİ: BE kayıt ediliyor
         profit
     ))
     conn.commit()
