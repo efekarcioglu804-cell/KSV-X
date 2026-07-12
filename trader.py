@@ -1,7 +1,7 @@
 import ccxt.async_support as ccxt
 import database as db
 
-# 💉 HAYALET COIN ENJEKTÖRÜ: Cornix'in göremediği coinleri borsaya zorla tanıtır!
+# 💉 HAYALET COIN ENJEKTÖRÜ: CCXT'nin tanımadığı coinleri zorla beyne yazar
 def hayalet_enjektor(borsa, sembol, coin_adi):
     if borsa.markets is not None and sembol not in borsa.markets:
         base = coin_adi.replace('USDT', '')
@@ -29,10 +29,13 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
         
         await borsa.load_markets()
-        hayalet_enjektor(borsa, sembol, sinyal['coin'])
+        hayalet_enjektor(borsa, sembol, sinyal['coin']) # Enjektör Devrede!
         
         market = borsa.market(sembol)
 
+        min_amount = market['limits']['amount']['min'] if market['limits']['amount']['min'] is not None else 0
+        min_cost = 0
+        
         acik_pozisyonlar = await borsa.fetch_positions()
         bekleyen_emirler = await borsa.fetch_open_orders()
         
@@ -82,8 +85,10 @@ async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
         await borsa.load_markets()
         hayalet_enjektor(borsa, sembol, coin)
         await borsa.cancel_all_orders(sembol)
-    except: pass
-    finally: await borsa.close()
+    except Exception as e:
+        pass
+    finally:
+        await borsa.close()
 
 async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, stop_mode, fiyatlar):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -109,7 +114,8 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
 
         if stop_mode != 'NONE':
             yeni_sl = None
-            if stop_mode == 'BREAKEVEN' and asama >= 2: yeni_sl = fiyatlar['giris']
+            if stop_mode == 'BREAKEVEN' and asama >= 2:
+                yeni_sl = fiyatlar['giris']
             elif stop_mode == 'MOVING':
                 if asama == 2: yeni_sl = fiyatlar['giris']
                 elif asama == 3: yeni_sl = fiyatlar['tp1']
@@ -119,6 +125,9 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
             if yeni_sl:
                 await borsa.cancel_all_orders(sembol)
                 await borsa.create_order(sembol, 'limit', ters_yon, toplam_miktar, yeni_sl, params={'stopLossPrice': yeni_sl, 'reduceOnly': True})
+                print(f"🛡️ {coin} Stop Loss güncellendi: {yeni_sl} ({stop_mode})")
 
-    except Exception as e: print(f"Hata (Kısmi Kar/Stop): {e}")
-    finally: await borsa.close()
+    except Exception as e:
+        print(f"Hata (Kısmi Kar/Stop): {e}")
+    finally:
+        await borsa.close()
