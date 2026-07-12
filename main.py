@@ -33,7 +33,8 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
             'linear': True,
             'contractSize': 1,
             'limits': {'amount': {'min': 0}, 'cost': {'min': 0}},
-            'precision': {'amount': 1.0, 'price': 0.0001}
+            # 👑 AYNI DÜZELTME BURAYA DA EKLENDİ
+            'precision': {'amount': 0.0001, 'price': 0.00000001}
         }
 
 @client.on(events.NewMessage(incoming=True))
@@ -82,7 +83,6 @@ async def genel_handler(event):
             sinyal = parse_signal(mesaj)
             if not sinyal: return
 
-            # 🧠 KRALIN DEKODERİ (MEME COIN ÖLÇEKLEYİCİ)
             borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
             try:
                 sembol_tmp = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
@@ -94,7 +94,7 @@ async def genel_handler(event):
                 
                 if fiyat_mexc > 0 and giris_fiyati > 0:
                     oran = giris_fiyati / fiyat_mexc
-                    if oran > 5: # Sinyal fiyatı çok büyük (100000FLOKI durumu)
+                    if oran > 5: 
                         carpan = 10 ** round(math.log10(oran))
                         sinyal['giris'] /= carpan
                         sinyal['tp1'] /= carpan
@@ -102,8 +102,8 @@ async def genel_handler(event):
                         sinyal['tp3'] /= carpan
                         sinyal['tp4'] /= carpan
                         sinyal['sl'] /= carpan
-                        print(f"🔧 Ölçek Küçültüldü! Çarpan: /{carpan} | Yeni Giriş: {sinyal['giris']}")
-                    elif oran < 0.2: # Sinyal fiyatı çok küçük
+                        print(f"🔧 Ölçek Küçültüldü! Çarpan: /{carpan}")
+                    elif oran < 0.2: 
                         carpan = 10 ** round(math.log10(1/oran))
                         sinyal['giris'] *= carpan
                         sinyal['tp1'] *= carpan
@@ -111,7 +111,7 @@ async def genel_handler(event):
                         sinyal['tp3'] *= carpan
                         sinyal['tp4'] *= carpan
                         sinyal['sl'] *= carpan
-                        print(f"🔧 Ölçek Büyütüldü! Çarpan: x{carpan} | Yeni Giriş: {sinyal['giris']}")
+                        print(f"🔧 Ölçek Büyütüldü! Çarpan: x{carpan}")
             except Exception as e:
                 print(f"Ölçekleyici hatası: {e}")
             finally:
@@ -199,7 +199,6 @@ async def fiyat_takip_radari():
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
                     
-                    # Dekoder başarısız olursa diye son kalkanı tutuyoruz, ama %99.9 devreye girmeyecek!
                     if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
                         yeni_durum = 'IPTAL'
                         bildirim = f"⚠️ **ÖLÇEK UYUŞMAZLIĞI (Sistem Koruması)** ⚠️\n#{coin} işlemi iptal edildi!\nSinyal Fiyatı: `{giris}`\nMEXC Fiyatı: `{fiyat_last}`"
