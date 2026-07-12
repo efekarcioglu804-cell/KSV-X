@@ -63,7 +63,6 @@ async def genel_handler(event):
                 
                 menu_msg = (
                     "✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅\n\n"
-                    "Bütün operasyon yetkisi bende Kralım. Sen TUS'a ve kuracağın o harika geleceğe odaklan, kasan emin ellerde.\n\n"
                     "İşte KSVİX'i yöneteceğin komut paneli:\n\n"
                     "⚙️ **TEMEL AYARLAR**\n"
                     "🔹 `/ayar [MOD] [MİKTAR] [MAX_İŞLEM]`\n"
