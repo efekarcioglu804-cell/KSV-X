@@ -163,8 +163,6 @@ async def fiyat_takip_radari():
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
                     
-                    # 🛡️ KRALIN ÖLÇEK KALKANI (Meme Coin Yanılsamasını Engeller)
-                    # Eğer fiyatlar arasında 5 kattan fazla fark varsa, ticker uyumsuzdur (1000PEPE, 100000FLOKI gibi)
                     if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
                         yeni_durum = 'IPTAL'
                         bildirim = f"⚠️ **ÖLÇEK UYUŞMAZLIĞI (Sistem Koruması)** ⚠️\n#{coin} işlemi iptal edildi!\nSinyal Fiyatı: `{giris}`\nMEXC Fiyatı: `{fiyat_last}`\n*(Muhtemel 1000x / 100000x Ticker Farkı)*"
@@ -242,6 +240,20 @@ async def fiyat_takip_radari():
                 if yeni_durum or yeni_asama:
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
                     if bildirim: vip_mesajlar.append(bildirim)
+
+                    # 👑 KRALIN EMRİ: TP Geldiğinde Özelden (DM) Bildirim At
+                    if yeni_asama and yeni_asama > asama:
+                        tp_fiyatlar = {1: tp1, 2: tp2, 3: tp3, 4: tp4}
+                        vurulan_tp = yeni_asama - 1
+                        hedef_fiyat = tp_fiyatlar.get(vurulan_tp, tp1)
+                        tp_roe = (abs(hedef_fiyat - giris) / giris) * kaldirac * 100
+                        
+                        for uye in aktif_uyeler:
+                            if str(uye['telegram_id']) in katilanlar_listesi:
+                                if yeni_asama == 5:
+                                    dm_mesajlar.append((uye['telegram_id'], f"👑 **#{coin} FULL TP Vuruldu!**\n🤑 Maksimum kâr (`+{tp_roe:.2f}%` {kaldirac}x ROE) cebinde! İşlem kapandı. 🥂"))
+                                else:
+                                    dm_mesajlar.append((uye['telegram_id'], f"🎯 **#{coin} TP{vurulan_tp} Vuruldu!**\n💸 Kısmi kâr satıldı (`+{tp_roe:.2f}%` {kaldirac}x ROE).\n🛡️ Stop kalkanı güncellendi! 🦅"))
 
                     if yeni_asama and yeni_asama >= 2 and yeni_asama < 5:
                         fiyatlar = {'giris': giris, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3}
