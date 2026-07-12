@@ -42,6 +42,10 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         for e in bekleyen_emirler:
             aktif_coinler.add(e['symbol'])
             
+        # 🛡️ PİRAMİTLEME KORUMASI: Aynı coine iki kere girip ortalamayı bozmasını engeller
+        if sembol in aktif_coinler:
+            return {"durum": "IPTAL", "hata_mesaji": f"Pusuda zaten {sinyal['coin']} var! Çifte işlem reddedildi."}
+            
         if len(aktif_coinler) >= ayarlar['max_trades']:
             return {"durum": "IPTAL", "hata_mesaji": f"Maksimum sınır aşıldı ({ayarlar['max_trades']})"}
 
@@ -94,7 +98,7 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
         hayalet_enjektor(borsa, sembol, coin)
         
         oranlar = [float(x) for x in tp_ratios.split(',')]
-        su_anki_hedef_oran = oranlar[asama - 2]
+        hedef_oran = oranlar[asama - 2]
         
         pozisyonlar = await borsa.fetch_positions([sembol])
         if not pozisyonlar: return
@@ -105,12 +109,21 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
 
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
         
-        # 1. Kısmi Kâr Satışı
-        kapatilacak_miktar = float(borsa.amount_to_precision(sembol, toplam_miktar * (su_anki_hedef_oran / 100)))
+        # 🧠 KRALIN MATEMATİĞİ (Zeno'nun Paradoksu Çözümü)
+        onceki_satilan_toplam = sum(oranlar[:asama-2]) if asama > 2 else 0
+        kalan_yuzde = 100.0 - onceki_satilan_toplam
+        
+        # Eğer son aşamadaysa (TP4) veya satılacak miktar kalanın %99'una denk geliyorsa masayı tamamen temizle!
+        if asama == 5 or kalan_yuzde <= 0 or (hedef_oran / kalan_yuzde) >= 0.99:
+            gercek_satis_orani = 1.0 
+        else:
+            gercek_satis_orani = hedef_oran / kalan_yuzde
+            
+        kapatilacak_miktar = float(borsa.amount_to_precision(sembol, toplam_miktar * gercek_satis_orani))
+        
         if kapatilacak_miktar > 0:
             await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
 
-        # 2. Hata Önleyici: Stop emri sadece elde KALAN miktara koyulur!
         kalan_miktar = toplam_miktar - kapatilacak_miktar
 
         if stop_mode != 'NONE' and kalan_miktar > 0:
@@ -125,7 +138,6 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
 
             if yeni_sl:
                 await borsa.cancel_all_orders(sembol)
-                # 3. Kalkan: Limit yerine Stop-Market (Trigger) emri
                 await borsa.create_order(
                     symbol=sembol, 
                     type='market', 
