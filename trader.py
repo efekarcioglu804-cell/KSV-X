@@ -1,4 +1,5 @@
 import ccxt.async_support as ccxt
+import asyncio
 import database as db
 
 def hayalet_enjektor(borsa, sembol, coin_adi):
@@ -42,7 +43,6 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         for e in bekleyen_emirler:
             aktif_coinler.add(e['symbol'])
             
-        # 🛡️ PİRAMİTLEME KORUMASI: Aynı coine iki kere girip ortalamayı bozmasını engeller
         if sembol in aktif_coinler:
             return {"durum": "IPTAL", "hata_mesaji": f"Pusuda zaten {sinyal['coin']} var! Çifte işlem reddedildi."}
             
@@ -90,6 +90,27 @@ async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
     finally:
         await borsa.close()
 
+async def acil_kapat(api_key, api_secret, coin, yon):
+    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    try:
+        sembol = coin.replace('USDT', '') + '/USDT:USDT'
+        await borsa.load_markets()
+        hayalet_enjektor(borsa, sembol, coin)
+        
+        pozisyonlar = await borsa.fetch_positions([sembol])
+        if pozisyonlar:
+            poz = pozisyonlar[0]
+            miktar = float(poz.get('contracts', 0) or poz.get('positionAmt', 0))
+            if miktar > 0:
+                ters_yon = 'sell' if yon == 'LONG' else 'buy'
+                await borsa.create_order(sembol, 'market', ters_yon, miktar, params={'reduceOnly': True})
+        
+        await borsa.cancel_all_orders(sembol)
+    except:
+        pass
+    finally:
+        await borsa.close()
+
 async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, stop_mode, fiyatlar):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
@@ -109,11 +130,9 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
 
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
         
-        # 🧠 KRALIN MATEMATİĞİ (Zeno'nun Paradoksu Çözümü)
         onceki_satilan_toplam = sum(oranlar[:asama-2]) if asama > 2 else 0
         kalan_yuzde = 100.0 - onceki_satilan_toplam
         
-        # Eğer son aşamadaysa (TP4) veya satılacak miktar kalanın %99'una denk geliyorsa masayı tamamen temizle!
         if asama == 5 or kalan_yuzde <= 0 or (hedef_oran / kalan_yuzde) >= 0.99:
             gercek_satis_orani = 1.0 
         else:
@@ -124,9 +143,13 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
         if kapatilacak_miktar > 0:
             await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
 
-        kalan_miktar = toplam_miktar - kapatilacak_miktar
+        await asyncio.sleep(1)
+        guncel_pozisyonlar = await borsa.fetch_positions([sembol])
+        if not guncel_pozisyonlar: return
+        
+        kalan_gercek_miktar = float(guncel_pozisyonlar[0].get('contracts', 0) or guncel_pozisyonlar[0].get('positionAmt', 0))
 
-        if stop_mode != 'NONE' and kalan_miktar > 0:
+        if stop_mode != 'NONE' and kalan_gercek_miktar > 0:
             yeni_sl = None
             if stop_mode == 'BREAKEVEN' and asama >= 2:
                 yeni_sl = fiyatlar['giris']
@@ -142,11 +165,11 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
                     symbol=sembol, 
                     type='market', 
                     side=ters_yon, 
-                    amount=float(borsa.amount_to_precision(sembol, kalan_miktar)), 
+                    amount=float(borsa.amount_to_precision(sembol, kalan_gercek_miktar)), 
                     params={'triggerPrice': yeni_sl, 'reduceOnly': True}
                 )
 
     except Exception as e:
-        print(f"Hata (Kısmi Kar/Stop Güncelleme): {e}")
+        print(f"Hata (Kısmi Kar/Stop): {e}")
     finally:
         await borsa.close()
