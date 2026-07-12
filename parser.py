@@ -18,14 +18,17 @@ def parse_signal(message_text):
     coin_match = re.search(r'#?([A-Z0-9]+)/?USDT', metin) 
     if coin_match: sonuc["coin"] = coin_match.group(1) + "USDT"
         
-    # GİRİŞ: Kralın %0.05 Esneme Payı (Tolerans)
+    # GİRİŞ: Rakamı alır ve %0.05 Kâr Dostu Akıllı Yuvarlama (Tolerans) uygular
     giris_match = re.search(r'ENTRY[:\s]+([0-9.,]+)', metin)
     if giris_match: 
         saf_giris = float(giris_match.group(1).replace(',', '.'))
-        if sonuc["yon"] == "LONG": sonuc["giris"] = saf_giris * 1.0005 
-        elif sonuc["yon"] == "SHORT": sonuc["giris"] = saf_giris * 0.9995 
+        # KRALIN ESNEME PAYI (%0.05)
+        if sonuc["yon"] == "LONG":
+            sonuc["giris"] = saf_giris * 1.0005 
+        elif sonuc["yon"] == "SHORT":
+            sonuc["giris"] = saf_giris * 0.9995 
             
-    # TP 1-4
+    # TP
     for i in range(1, 5):
         tp_match = re.search(rf'TP{i}[:\s]+([0-9.,]+)', metin)
         if tp_match: sonuc[f"tp{i}"] = float(tp_match.group(1).replace(',', '.'))
@@ -34,7 +37,7 @@ def parse_signal(message_text):
     sl_match = re.search(r'STOP\s*LOSS[:\s]+([0-9.,]+)', metin)
     if sl_match: sonuc["sl"] = float(sl_match.group(1).replace(',', '.'))
 
-    # KALDIRAÇ (Sinyalden okuyup ROE şovu için kaydeder)
+    # KALDIRAÇ
     kaldirac_match = re.search(r'LEVERAGE[:\s]+(CROSS|ISOLATED)?\s*([0-9]+)X?', metin)
     if kaldirac_match:
         if kaldirac_match.group(1): sonuc["margin_tipi"] = kaldirac_match.group(1)
