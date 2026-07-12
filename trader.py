@@ -1,7 +1,6 @@
 import ccxt.async_support as ccxt
 import database as db
 
-# 💉 HAYALET COIN ENJEKTÖRÜ: CCXT'nin tanımadığı coinleri zorla beyne yazar
 def hayalet_enjektor(borsa, sembol, coin_adi):
     if borsa.markets is not None and sembol not in borsa.markets:
         base = coin_adi.replace('USDT', '')
@@ -29,7 +28,7 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
         
         await borsa.load_markets()
-        hayalet_enjektor(borsa, sembol, sinyal['coin']) # Enjektör Devrede!
+        hayalet_enjektor(borsa, sembol, sinyal['coin'])
         
         market = borsa.market(sembol)
         
@@ -82,7 +81,7 @@ async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
         await borsa.load_markets()
         hayalet_enjektor(borsa, sembol, coin)
         await borsa.cancel_all_orders(sembol)
-    except Exception as e:
+    except:
         pass
     finally:
         await borsa.close()
@@ -102,13 +101,19 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
             
         poz = pozisyonlar[0]
         toplam_miktar = float(poz.get('contracts', 0) or poz.get('positionAmt', 0))
+        if toplam_miktar <= 0: return
+
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
         
-        if toplam_miktar > 0 and su_anki_hedef_oran > 0:
-            kapatilacak_miktar = borsa.amount_to_precision(sembol, toplam_miktar * (su_anki_hedef_oran / 100))
+        # 1. Kısmi Kâr Satışı
+        kapatilacak_miktar = float(borsa.amount_to_precision(sembol, toplam_miktar * (su_anki_hedef_oran / 100)))
+        if kapatilacak_miktar > 0:
             await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
 
-        if stop_mode != 'NONE':
+        # 2. Hata Önleyici: Stop emri sadece elde KALAN miktara koyulur!
+        kalan_miktar = toplam_miktar - kapatilacak_miktar
+
+        if stop_mode != 'NONE' and kalan_miktar > 0:
             yeni_sl = None
             if stop_mode == 'BREAKEVEN' and asama >= 2:
                 yeni_sl = fiyatlar['giris']
@@ -120,9 +125,16 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
 
             if yeni_sl:
                 await borsa.cancel_all_orders(sembol)
-                await borsa.create_order(sembol, 'limit', ters_yon, toplam_miktar, yeni_sl, params={'stopLossPrice': yeni_sl, 'reduceOnly': True})
+                # 3. Kalkan: Limit yerine Stop-Market (Trigger) emri
+                await borsa.create_order(
+                    symbol=sembol, 
+                    type='market', 
+                    side=ters_yon, 
+                    amount=float(borsa.amount_to_precision(sembol, kalan_miktar)), 
+                    params={'triggerPrice': yeni_sl, 'reduceOnly': True}
+                )
 
     except Exception as e:
-        print(f"Hata (Kısmi Kar/Stop): {e}")
+        print(f"Hata (Kısmi Kar/Stop Güncelleme): {e}")
     finally:
         await borsa.close()
