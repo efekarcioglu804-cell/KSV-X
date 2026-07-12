@@ -19,7 +19,8 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
             'linear': True,
             'contractSize': 1,
             'limits': {'amount': {'min': 0}, 'cost': {'min': 0}},
-            'precision': {'amount': 1.0, 'price': 0.0001}
+            # 👑 KRALIN TESPİTİYLE DÜZELTİLEN YER: Virgülden sonra 8 basamağa (1e-8) çıkarıldı!
+            'precision': {'amount': 0.0001, 'price': 0.00000001} 
         }
 
 async def islem_ac(api_key, api_secret, ayarlar, sinyal):
@@ -67,10 +68,13 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         
         hedef_coin_miktari = toplam_hacim_usdt / sinyal['giris']
         kontrat_miktari = hedef_coin_miktari / contract_size
+        
         miktar = borsa.amount_to_precision(sembol, kontrat_miktari)
+        fiyat_hassas = float(borsa.price_to_precision(sembol, sinyal['giris']))
+        sl_hassas = float(borsa.price_to_precision(sembol, sinyal['sl']))
 
-        params = {'stopLossPrice': sinyal['sl'], 'reduceOnly': False}
-        emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=sinyal['giris'], params=params)
+        params = {'stopLossPrice': sl_hassas, 'reduceOnly': False}
+        emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=fiyat_hassas, params=params)
         return {"durum": "BASARILI", "emir_id": emir['id']}
 
     except Exception as e:
@@ -160,16 +164,18 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
                 elif asama == 5: yeni_sl = fiyatlar['tp3']
 
             if yeni_sl:
+                yeni_sl_hassas = float(borsa.price_to_precision(sembol, yeni_sl))
+                
                 await borsa.cancel_all_orders(sembol)
                 await borsa.create_order(
                     symbol=sembol, 
                     type='market', 
                     side=ters_yon, 
                     amount=float(borsa.amount_to_precision(sembol, kalan_gercek_miktar)), 
-                    params={'triggerPrice': yeni_sl, 'reduceOnly': True}
+                    params={'triggerPrice': yeni_sl_hassas, 'reduceOnly': True}
                 )
 
     except Exception as e:
-        print(f"Hata (Kısmi Kar/Stop): {e}")
+        print(f"Hata (Kısmi Kar/Stop Güncelleme): {e}")
     finally:
         await borsa.close()
