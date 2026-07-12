@@ -32,9 +32,6 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         hayalet_enjektor(borsa, sembol, sinyal['coin']) # Enjektör Devrede!
         
         market = borsa.market(sembol)
-
-        min_amount = market['limits']['amount']['min'] if market['limits']['amount']['min'] is not None else 0
-        min_cost = 0
         
         acik_pozisyonlar = await borsa.fetch_positions()
         bekleyen_emirler = await borsa.fetch_open_orders()
@@ -110,7 +107,6 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
         if toplam_miktar > 0 and su_anki_hedef_oran > 0:
             kapatilacak_miktar = borsa.amount_to_precision(sembol, toplam_miktar * (su_anki_hedef_oran / 100))
             await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
-            print(f"💸 {coin} için %{su_anki_hedef_oran} kâr satışı yapıldı.")
 
         if stop_mode != 'NONE':
             yeni_sl = None
@@ -125,7 +121,6 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
             if yeni_sl:
                 await borsa.cancel_all_orders(sembol)
                 await borsa.create_order(sembol, 'limit', ters_yon, toplam_miktar, yeni_sl, params={'stopLossPrice': yeni_sl, 'reduceOnly': True})
-                print(f"🛡️ {coin} Stop Loss güncellendi: {yeni_sl} ({stop_mode})")
 
     except Exception as e:
         print(f"Hata (Kısmi Kar/Stop): {e}")
