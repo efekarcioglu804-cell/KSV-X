@@ -1,10 +1,9 @@
-from visuals import create_pnl_image
-import os
 import asyncio
 import sqlite3
 import time
 import datetime
 import math
+import os
 import ccxt.pro as ccxt 
 from telethon import TelegramClient, events
 
@@ -12,6 +11,7 @@ import config
 import database as db
 from parser import parse_signal
 from trader import islem_ac, bekleyen_emri_iptal_et, pozisyon_guncelle, acil_kapat
+from visuals import create_pnl_image
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -38,23 +38,55 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
             'precision': {'amount': 0.0001, 'price': 0.00000001}
         }
 
+# 🧠 YAPAY ZEKA İÇİN PİYASA FOTOĞRAFÇISI (RSI, MACD, HACİM HESAPLAYICI)
+def hesapla_ema(fiyatlar, periyot):
+    if not fiyatlar: return 0
+    k = 2 / (periyot + 1)
+    ema_serisi = [fiyatlar[0]]
+    for fiyat in fiyatlar[1:]:
+        ema_serisi.append(fiyat * k + ema_serisi[-1] * (1 - k))
+    return ema_serisi[-1]
+
+async def piyasa_fotografi_cek(borsa, sembol):
+    try:
+        # Son 50 adet 15 dakikalık mumu çek (Geçmiş 12 saatlik trendi okur)
+        mumlar = await borsa.fetch_ohlcv(sembol, '15m', limit=50)
+        if not mumlar or len(mumlar) < 30: return 0.0, 0.0, 0.0
+        
+        kapanislar = [mum[4] for mum in mumlar]
+        hacim = mumlar[-1][5] # Son mumun hacmi (Büyük balina tespiti için)
+        
+        # Matematiksel RSI Hesaplama (14 Periyot)
+        farklar = [kapanislar[i] - kapanislar[i-1] for i in range(1, len(kapanislar))]
+        kazanclar = [f if f > 0 else 0 for f in farklar[-14:]]
+        kayiplar = [-f if f < 0 else 0 for f in farklar[-14:]]
+        ort_kazanc = sum(kazanclar) / 14
+        ort_kayip = sum(kayiplar) / 14
+        rs = ort_kazanc / ort_kayip if ort_kayip > 0 else 0
+        rsi = 100 - (100 / (1 + rs)) if ort_kayip > 0 else 100
+        
+        # Matematiksel MACD Hesaplama
+        ema_12 = hesapla_ema(kapanislar, 12)
+        ema_26 = hesapla_ema(kapanislar, 26)
+        macd = ema_12 - ema_26
+        
+        return round(rsi, 2), round(macd, 4), round(hacim, 2)
+    except Exception as e:
+        print(f"Piyasa Fotoğrafı Çekilemedi: {e}")
+        return 0.0, 0.0, 0.0
+
 @client.on(events.NewMessage(incoming=True))
 async def genel_handler(event):
     mesaj = event.raw_text.strip()
     
     if event.is_private:
-        print(f"📨 [DM GELDİ] Gönderen: {event.sender_id} | Mesaj: {mesaj}")
         gonderen_id = event.sender_id
-        
         if mesaj.startswith('/start'):
             start_msg = (
                 "👑 **KSVİX KOMUTA MERKEZİNE HOŞ GELDİNİZ!** 👑\n\n"
                 "Wall Street standartlarında, duygusuz ve keskin nişancı ticaret botunuz aktif edildi.\n"
                 "Bütün piyasa radarları sizin emrinizi bekliyor.\n\n"
-                "Sistemi başlatmak ve kasanızı otomasyona bağlamak için MEXC API bilgilerinizi girmelisiniz.\n\n"
-                "🔒 **Kayıt Komutu:**\n"
-                "`/kayit API_KEY API_SECRET`\n\n"
-                "*(Bilgileriniz KSVİX zırhı altında sunucuda şifrelenir.)*"
+                "🔒 **Kayıt Komutu:**\n`/kayit API_KEY API_SECRET`"
             )
             await event.reply(start_msg)
             
@@ -62,30 +94,7 @@ async def genel_handler(event):
             try:
                 _, api_key, api_secret = mesaj.split()
                 db.add_user(gonderen_id, api_key, api_secret)
-                
-                menu_msg = (
-                    "✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅\n\n"
-                    "Bütün operasyon yetkisi devralındı. Kasanız emin ellerde ve sistem tam otomatik avlanma modunda.\n\n"
-                    "İşte KSVİX'i yöneteceğiniz komut paneli:\n\n"
-                    "⚙️ **TEMEL AYARLAR**\n"
-                    "🔹 `/ayar [MOD] [MİKTAR] [MAX_İŞLEM]`\n"
-                    "   *Modlar:* `PERCENT` (Kasa yüzdesi) veya `FIXED` (Sabit USDT)\n"
-                    "   *Örnek:* `/ayar PERCENT 5 8` *(Kasanın %5'i ile gir, maksimum 8 işlem aç)*\n\n"
-                    "🎯 **KÂR ALMA (TP) HEDEFLERİ**\n"
-                    "🔹 `/hedef [TP1] [TP2] [TP3] [TP4]`\n"
-                    "   *Örnek:* `/hedef 50 25 15 10` *(Her hedefte satılacak pozisyon yüzdesi)*\n\n"
-                    "🛡️ **STOP KALKANI (RİSK YÖNETİMİ)**\n"
-                    "🔹 `/stop [MOD]`\n"
-                    "   *Modlar:* \n"
-                    "   `MOVING` *(Kâr geldikçe stop seviyesini yukarı taşır)*\n"
-                    "   `BREAKEVEN` *(TP1 geldiğinde stopu anında maliyete çeker)*\n"
-                    "   `NONE` *(Sadece orijinal zarar kes seviyesini kullanır)*\n"
-                    "   *Örnek:* `/stop MOVING`\n\n"
-                    "🛑 **MOTOR KONTROLÜ**\n"
-                    "🔹 `/durdur` - *Botu uyku moduna alır (Yeni sinyallere girmez).* \n"
-                    "🔹 `/devam` - *Kalkanları indirir, tekrar avlanmaya başlar.*"
-                )
-                await event.reply(menu_msg)
+                await event.reply("✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅\n\nAyarlar için: `/ayar PERCENT 5 8`, `/hedef 50 25 15 10`, `/stop MOVING`")
             except: 
                 await event.reply("❌ **Hatalı format!** Örnek kullanım: `/kayit API_KEY API_SECRET`")
                 
@@ -125,10 +134,15 @@ async def genel_handler(event):
             if not sinyal: return
 
             borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+            rsi_degeri, macd_degeri, hacim_degeri = 0.0, 0.0, 0.0
             try:
                 sembol_tmp = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
                 await borsa_tmp.load_markets()
                 hayalet_enjektor(borsa_tmp, sembol_tmp, sinyal['coin'])
+                
+                # 🧠 Sinyal gelir gelmez fotoğraf çek!
+                rsi_degeri, macd_degeri, hacim_degeri = await piyasa_fotografi_cek(borsa_tmp, sembol_tmp)
+                
                 ticker = await borsa_tmp.fetch_ticker(sembol_tmp)
                 fiyat_mexc = float(ticker['last'])
                 giris_fiyati = float(sinyal['giris'])
@@ -158,9 +172,11 @@ async def genel_handler(event):
             finally:
                 await borsa_tmp.close()
                 
+            # 🧠 Veritabanına Yapay Zeka için 3 yeni metrik de sessizce kaydediliyor
             signal_id = db.sinyal_kaydet(
                 sinyal['coin'], sinyal['yon'], sinyal['giris'], 
-                sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl'], sinyal['kaldirac']
+                sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl'], 
+                sinyal['kaldirac'], rsi_degeri, macd_degeri, hacim_degeri
             )
             
             aktif_uyeler = db.get_all_active_users()
@@ -230,7 +246,6 @@ async def fiyat_takip_radari():
                 
                 fiyat_last = float(ticker.get('last') or 0)
                 if not fiyat_last: continue
-                fiyat_mark = float(ticker.get('mark') or ticker.get('info', {}).get('markPrice', fiyat_last))
                 
                 sinyal = sembol_map[sembol]
                 s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar, kaldirac = sinyal
@@ -270,7 +285,7 @@ async def fiyat_takip_radari():
                                 elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
                                 elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
 
-                            if (yon == 'LONG' and fiyat_mark <= kullanici_stop) or (yon == 'SHORT' and fiyat_mark >= kullanici_stop):
+                            if (yon == 'LONG' and fiyat_last <= kullanici_stop) or (yon == 'SHORT' and fiyat_last >= kullanici_stop):
                                 katilanlar_listesi.remove(tid_str)
                                 db_guncellemeler.append(("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (",".join(katilanlar_listesi), s_id)))
                                 
@@ -288,7 +303,7 @@ async def fiyat_takip_radari():
                                     dm_msg = f"🛡️ **#{coin} İz Süren Stop!**\n📈 `+{roe:.2f}%` ({kaldirac}x ROE) kârla kapandı. 🔥"
                                 dm_mesajlar.append((uye['telegram_id'], dm_msg))
 
-                    if (yon == 'LONG' and fiyat_mark <= sl) or (yon == 'SHORT' and fiyat_mark >= sl):
+                    if (yon == 'LONG' and fiyat_last <= sl) or (yon == 'SHORT' and fiyat_last >= sl):
                         yeni_durum = 'STOP_OLDU'
                         roe = (abs(sl - giris) / giris) * kaldirac * 100
                         bildirim = f"🛡 **STOP PATLADI** | #{coin}\n🩸 **Zarar:** `-{roe:.2f}%` ({kaldirac}x ROE) ⚔️"
@@ -318,7 +333,6 @@ async def fiyat_takip_radari():
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
                     if bildirim: vip_mesajlar.append(bildirim)
 
-                    # 👑 KRALIN EMRİ: İŞLEME GİRİLDİĞİ AN DM'DEN BİLDİRİM AT!
                     if yeni_durum == 'ISLEMDE' and durum == 'BEKLIYOR':
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
@@ -395,8 +409,8 @@ async def gunluk_pnl_raporlayici():
                     bes = stats['be_adet'] if stats else 0
                     kar = stats['kar_usdt'] if stats else 0.0
                     
-                    # 👑 KRALIN TESPİTİ: %114 hatasını çözdük, kar*100 kısmını sildik!
-                    kar_metni = f"{kar:+.2f} USDT" if uye['trade_mode'] == 'FIXED' else f"{kar:+.2f}% Net Kasa Büyümesi"
+                    # 👑 KRALIN TESPİTİ: %114 hatasını çözdük!
+                    kar_metni = f"{kar:+.2f} USDT" if uye['trade_mode'] == 'FIXED' else f"% {kar:+.2f} Net Kasa Büyümesi"
                         
                     pnl_msg = (
                         f"👑 **KRALIN SİNYALLERİ - GÜNLÜK BİLANÇO** 👑\n"
@@ -412,14 +426,13 @@ async def gunluk_pnl_raporlayici():
                     try:
                         img_path = create_pnl_image(acilan, tps, stops, bes, kar, uye['trade_mode'])
                         await client.send_file(uye['telegram_id'], img_path, caption=pnl_msg)
-                        os.remove(img_path) # Gönderdikten sonra sunucuda yer kaplamaması için sil
+                        os.remove(img_path) 
                     except Exception as e:
                         print(f"Görsel gönderilemedi: {e}")
-                        await client.send_message(uye['telegram_id'], pnl_msg) # Görsel çökerse düz metin at
+                        await client.send_message(uye['telegram_id'], pnl_msg) 
                         
                 await asyncio.sleep(70) 
-        except Exception as e:
-            print(f"Raporlayici hatasi: {e}")
+        except Exception:
             pass
         await asyncio.sleep(30)
 
