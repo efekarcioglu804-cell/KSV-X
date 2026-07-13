@@ -5,13 +5,11 @@ import datetime
 DB_NAME = "vip_kullanicilar.sqlite"
 
 def get_connection():
-    # 30 saniye bekleme süresi eklendi (Lock hatası için)
     return sqlite3.connect(DB_NAME, timeout=30)
 
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
-    # ⚡ WAL MODU: Okuma ve Yazmanın çakışmasını engeller
     cursor.execute("PRAGMA journal_mode=WAL;") 
     
     cursor.execute('''
@@ -42,7 +40,10 @@ def init_db():
             durum TEXT DEFAULT 'BEKLIYOR',
             asama INTEGER DEFAULT 0,
             eklenme_zamani REAL,
-            katilanlar TEXT DEFAULT ''
+            katilanlar TEXT DEFAULT '',
+            rsi REAL DEFAULT 0.0,
+            macd REAL DEFAULT 0.0,
+            hacim REAL DEFAULT 0.0
         )
     ''')
     cursor.execute('''
@@ -58,7 +59,7 @@ def init_db():
         )
     ''')
     
-    # Eski veritabanını bozmadan yeni özellikleri enjekte et
+    # Eski veritabanını bozmadan yeni Yapay Zeka sütunlarını enjekte et
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
     except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
@@ -66,6 +67,13 @@ def init_db():
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN kaldirac INTEGER DEFAULT 20")
     except: pass
     try: cursor.execute("ALTER TABLE user_daily_stats ADD COLUMN be_adet INTEGER DEFAULT 0")
+    except: pass
+    # 🧠 YAPAY ZEKA VERİ MADENCİLİĞİ SÜTUNLARI
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN rsi REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN macd REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN hacim REAL DEFAULT 0.0")
     except: pass
     
     conn.commit()
@@ -123,14 +131,15 @@ def get_all_active_users():
     conn.close()
     return users
 
-def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20):
+# 🧠 KAYIT FONKSİYONUNA RSI, MACD VE HACIM PARAMETRELERİ EKLENDİ
+def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi=0.0, macd=0.0, hacim=0.0):
     conn = get_connection()
     cursor = conn.cursor()
     su_an = time.time()
     cursor.execute('''
-        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?)
-    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an))
+        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi, macd, hacim) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?, ?, ?, ?)
+    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi, macd, hacim))
     signal_id = cursor.lastrowid
     conn.commit()
     conn.close()
