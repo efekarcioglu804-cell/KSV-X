@@ -127,6 +127,28 @@ async def genel_handler(event):
             db.toggle_user_active(gonderen_id, 1)
             await event.reply("✅ **Sistem Aktif!** Silahlar devrede, piyasa taranıyor. 🦅")
             
+        # 👑 KRALIN YENİ KOMUTU: YAPAY ZEKA SAYACI
+        elif mesaj.startswith('/sayac'):
+            conn = sqlite3.connect(db.DB_NAME, timeout=30)
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM active_signals")
+                toplam_sinyal = cursor.fetchone()[0]
+            except Exception as e:
+                toplam_sinyal = 0
+            finally:
+                conn.close()
+            
+            kalan = 800 - toplam_sinyal if toplam_sinyal < 800 else 0
+            
+            sayac_msg = (
+                f"🧠 **KSVİX Yapay Zeka (AI) Veri Havuzu:**\n\n"
+                f"🗃️ Toplanan Eğitim Verisi: `{toplam_sinyal}` İşlem\n"
+                f"🎯 800 Barajına Kalan: `{kalan}` İşlem\n\n"
+                f"{'🔥 **Kritik eşiğe ulaşıldı! Modeli eğitmeye başlayabiliriz Kralım!**' if toplam_sinyal >= 800 else '🦅 İstihbarat toplanmaya devam ediyor...'}"
+            )
+            await event.reply(sayac_msg)
+            
     else:
         if event.chat_id == VIP_KANAL_ID:
             print(f"🚀 [VIP KANAL] Sinyal yakalandı: {mesaj}")
@@ -443,11 +465,9 @@ async def gunluk_pnl_raporlayici():
                 conn = sqlite3.connect(db.DB_NAME, timeout=30)
                 try:
                     cursor = conn.cursor()
-                    # Tüm kaydedilmiş sinyalleri say (Eğitim Verisi)
                     cursor.execute("SELECT COUNT(*) FROM active_signals")
                     toplam_sinyal = cursor.fetchone()[0]
                     
-                    # Sadece şu an içeride aktif / bekleyen sinyalleri say
                     cursor.execute("SELECT COUNT(*) FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
                     aktif_sinyal = cursor.fetchone()[0]
                 except Exception as e:
