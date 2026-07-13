@@ -400,6 +400,8 @@ async def gunluk_pnl_raporlayici():
         try:
             su_an = datetime.datetime.now()
             if su_an.hour == 20 and su_an.minute == 59:
+                
+                # 1. KISIM: KULLANICILARA ÖZEL BİLANÇO VE GRAFİK (DM)
                 aktif_uyeler = db.get_all_active_users()
                 for uye in aktif_uyeler:
                     stats = db.get_daily_stats(uye['telegram_id'])
@@ -409,7 +411,6 @@ async def gunluk_pnl_raporlayici():
                     bes = stats['be_adet'] if stats else 0
                     kar = stats['kar_usdt'] if stats else 0.0
                     
-                    # 👑 KRALIN TESPİTİ: %114 hatasını çözdük!
                     kar_metni = f"{kar:+.2f} USDT" if uye['trade_mode'] == 'FIXED' else f"% {kar:+.2f} Net Kasa Büyümesi"
                         
                     pnl_msg = (
@@ -422,7 +423,6 @@ async def gunluk_pnl_raporlayici():
                         f"💰 **Net Kasa Durumu:** `{kar_metni}`\n"
                     )
                     
-                    # 📊 8 GB RAM'in Gücü: Görseli Üret ve Gönder!
                     try:
                         img_path = create_pnl_image(acilan, tps, stops, bes, kar, uye['trade_mode'])
                         await client.send_file(uye['telegram_id'], img_path, caption=pnl_msg)
@@ -430,7 +430,38 @@ async def gunluk_pnl_raporlayici():
                     except Exception as e:
                         print(f"Görsel gönderilemedi: {e}")
                         await client.send_message(uye['telegram_id'], pnl_msg) 
-                        
+                
+                # 2. KISIM: VİP GRUBA YAPAY ZEKA (ML) VERİ RAPORU
+                conn = sqlite3.connect(db.DB_NAME, timeout=30)
+                try:
+                    cursor = conn.cursor()
+                    # Tüm kaydedilmiş sinyalleri say (Eğitim Verisi)
+                    cursor.execute("SELECT COUNT(*) FROM active_signals")
+                    toplam_sinyal = cursor.fetchone()[0]
+                    
+                    # Sadece şu an içeride aktif / bekleyen sinyalleri say
+                    cursor.execute("SELECT COUNT(*) FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
+                    aktif_sinyal = cursor.fetchone()[0]
+                except Exception as e:
+                    print(f"Veri sayımı hatası: {e}")
+                    toplam_sinyal, aktif_sinyal = 0, 0
+                finally:
+                    conn.close()
+
+                vip_msg = (
+                    f"🧠 **KSVİX YAPAY ZEKA (AI) İSTİHBARAT MERKEZİ** 🧠\n"
+                    f"📅 **Tarih:** {su_an.strftime('%d %B %Y')}\n\n"
+                    f"Wall Street standartlarında Makine Öğrenmesi (Machine Learning) modelimizi eğitmek için piyasadan toplanan güncel veri seti raporudur:\n\n"
+                    f"🗃️ **Havuzdaki Toplam Eğitim Verisi:** `{toplam_sinyal} İşlem`\n"
+                    f"⏳ **Şu An Radarda Takip Edilen:** `{aktif_sinyal} İşlem`\n\n"
+                    f"*(Not: Veri setimiz 800-1000 işlem eşiğine ulaştığında K-Means ve Rastgele Orman algoritmaları devreye alınacaktır. KSVİX şu an sadece veri toplamaktadır.)* 🦅"
+                )
+                
+                try: 
+                    await client.send_message(VIP_KANAL_ID, vip_msg)
+                except Exception as e:
+                    print(f"VIP Gruba mesaj atılamadı: {e}")
+
                 await asyncio.sleep(70) 
         except Exception:
             pass
