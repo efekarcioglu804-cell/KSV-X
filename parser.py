@@ -18,15 +18,11 @@ def parse_signal(message_text):
     coin_match = re.search(r'#?([A-Z0-9]+)/?USDT', metin) 
     if coin_match: sonuc["coin"] = coin_match.group(1) + "USDT"
         
-    # GİRİŞ: Rakamı alır ve %0.05 Kâr Dostu Akıllı Yuvarlama (Tolerans) uygular
+    # 👑 KRALIN EMRİ: ESNEME PAYI İPTAL!
+    # GİRİŞ: Rakamı alır ve Cornix gibi hiçbir ekleme/çıkarma yapmadan dümdüz iletir.
     giris_match = re.search(r'ENTRY[:\s]+([0-9.,]+)', metin)
     if giris_match: 
-        saf_giris = float(giris_match.group(1).replace(',', '.'))
-        # KRALIN ESNEME PAYI (%0.05)
-        if sonuc["yon"] == "LONG":
-            sonuc["giris"] = saf_giris * 1.0005 
-        elif sonuc["yon"] == "SHORT":
-            sonuc["giris"] = saf_giris * 0.9995 
+        sonuc["giris"] = float(giris_match.group(1).replace(',', '.'))
             
     # TP
     for i in range(1, 5):
