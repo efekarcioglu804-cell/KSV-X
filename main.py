@@ -269,6 +269,14 @@ async def fiyat_takip_radari():
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
                     
+                    # 👑 KRALIN YENİ KORUMASI: GİRİŞTEN ÖNCE TP VURURSA İPTAL ET (Falling Knife Koruması)
+                    elif tp1 > 0 and ((yon == 'LONG' and fiyat_last >= tp1) or (yon == 'SHORT' and fiyat_last <= tp1)):
+                        yeni_durum = 'IPTAL'
+                        bildirim = f"⚠️ **#{coin} İptal Edildi!**\n🛑 **Sebep:** KSVİX işleme giremeden coin hedefine (TP) ulaştı (Hit Profit Before Entry). Tuzaktan kurtulduk! 🦅"
+                        for uye in aktif_uyeler:
+                            if str(uye['telegram_id']) in katilanlar_listesi:
+                                mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
+
                     elif (yon == 'LONG' and fiyat_last <= giris) or (yon == 'SHORT' and fiyat_last >= giris):
                         yeni_durum, yeni_asama = 'ISLEMDE', 1
                         bildirim = f"🟢 **İŞLEME GİRİLDİ** | #{coin}\n⚡ **Yön:** {yon} | **Giriş:** {giris} 🚀"
