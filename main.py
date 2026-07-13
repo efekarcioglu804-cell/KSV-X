@@ -1,3 +1,5 @@
+from visuals import create_pnl_image
+import os
 import asyncio
 import sqlite3
 import time
@@ -392,7 +394,9 @@ async def gunluk_pnl_raporlayici():
                     stops = stats['stop_adet'] if stats else 0
                     bes = stats['be_adet'] if stats else 0
                     kar = stats['kar_usdt'] if stats else 0.0
-                    kar_metni = f"{kar:+.2f} USDT" if uye['trade_mode'] == 'FIXED' else f"{kar*100:+.2f}% Net Kasa Büyümesi"
+                    
+                    # 👑 KRALIN TESPİTİ: %114 hatasını çözdük, kar*100 kısmını sildik!
+                    kar_metni = f"{kar:+.2f} USDT" if uye['trade_mode'] == 'FIXED' else f"{kar:+.2f}% Net Kasa Büyümesi"
                         
                     pnl_msg = (
                         f"👑 **KRALIN SİNYALLERİ - GÜNLÜK BİLANÇO** 👑\n"
@@ -403,10 +407,19 @@ async def gunluk_pnl_raporlayici():
                         f"⚖️ **Break-Even (Zararsız):** {bes}\n\n"
                         f"💰 **Net Kasa Durumu:** `{kar_metni}`\n"
                     )
-                    try: await client.send_message(uye['telegram_id'], pnl_msg)
-                    except: pass
+                    
+                    # 📊 8 GB RAM'in Gücü: Görseli Üret ve Gönder!
+                    try:
+                        img_path = create_pnl_image(acilan, tps, stops, bes, kar, uye['trade_mode'])
+                        await client.send_file(uye['telegram_id'], img_path, caption=pnl_msg)
+                        os.remove(img_path) # Gönderdikten sonra sunucuda yer kaplamaması için sil
+                    except Exception as e:
+                        print(f"Görsel gönderilemedi: {e}")
+                        await client.send_message(uye['telegram_id'], pnl_msg) # Görsel çökerse düz metin at
+                        
                 await asyncio.sleep(70) 
-        except Exception:
+        except Exception as e:
+            print(f"Raporlayici hatasi: {e}")
             pass
         await asyncio.sleep(30)
 
