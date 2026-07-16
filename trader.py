@@ -5,7 +5,6 @@ import database as db
 def hayalet_enjektor(borsa, sembol, coin_adi):
     if borsa.markets is not None and sembol not in borsa.markets:
         base = coin_adi.replace('USDT', '')
-        print(f"💉 {coin_adi} için Hayalet Enjektör Devrede! Borsaya zorla tanıtılıyor...")
         borsa.markets[sembol] = {
             'id': f"{base}_USDT",
             'symbol': sembol,
@@ -19,7 +18,6 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
             'linear': True,
             'contractSize': 1,
             'limits': {'amount': {'min': 0}, 'cost': {'min': 0}},
-            # 👑 KRALIN TESPİTİYLE DÜZELTİLEN YER: Virgülden sonra 8 basamağa (1e-8) çıkarıldı!
             'precision': {'amount': 0.0001, 'price': 0.00000001} 
         }
 
@@ -37,24 +35,33 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         acik_pozisyonlar = await borsa.fetch_positions()
         bekleyen_emirler = await borsa.fetch_open_orders()
         
-        aktif_coinler = set()
+        aktif_pozisyon_coinleri = set()
         for p in acik_pozisyonlar:
             if float(p.get('contracts', 0) or p.get('positionAmt', 0)) > 0:
-                aktif_coinler.add(p['symbol'])
+                aktif_pozisyon_coinleri.add(p['symbol'])
+                
+        if sembol in aktif_pozisyon_coinleri:
+            return {"durum": "IPTAL", "hata_mesaji": f"İçeride aktif {sinyal['coin']} işlemi var! Yeni sinyal reddedildi."}
+            
+        eski_pusu_var = any(e['symbol'] == sembol for e in bekleyen_emirler)
+        if eski_pusu_var:
+            await borsa.cancel_all_orders(sembol)
+            await asyncio.sleep(0.5) 
+            
+        bekleyen_limit_coinleri = set()
         for e in bekleyen_emirler:
-            aktif_coinler.add(e['symbol'])
-            
-        if sembol in aktif_coinler:
-            return {"durum": "IPTAL", "hata_mesaji": f"Pusuda zaten {sinyal['coin']} var! Çifte işlem reddedildi."}
-            
-        if len(aktif_coinler) >= ayarlar['max_trades']:
+            if e['symbol'] != sembol and e['symbol'] not in aktif_pozisyon_coinleri:
+                bekleyen_limit_coinleri.add(e['symbol'])
+                
+        aktif_islem_sayisi = len(aktif_pozisyon_coinleri) + len(bekleyen_limit_coinleri)
+        
+        if aktif_islem_sayisi >= ayarlar['max_trades']:
             return {"durum": "IPTAL", "hata_mesaji": f"Maksimum sınır aşıldı ({ayarlar['max_trades']})"}
 
         try:
             await borsa.set_leverage(sinyal['kaldirac'], sembol)
             await borsa.set_margin_mode(sinyal['margin_tipi'].lower(), sembol)
-        except:
-            pass
+        except: pass
 
         bakiye = await borsa.fetch_balance({'type': 'swap'})
         wallet_balance = float(bakiye.get('free', {}).get('USDT', bakiye['total'].get('USDT', 0)))
@@ -75,7 +82,8 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
 
         params = {'stopLossPrice': sl_hassas, 'reduceOnly': False}
         emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=fiyat_hassas, params=params)
-        return {"durum": "BASARILI", "emir_id": emir['id']}
+        
+        return {"durum": "BASARILI", "emir_id": emir['id'], "eski_silindi": eski_pusu_var}
 
     except Exception as e:
         return {"durum": "HATA", "hata_mesaji": str(e)}
@@ -89,10 +97,8 @@ async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
         await borsa.load_markets()
         hayalet_enjektor(borsa, sembol, coin)
         await borsa.cancel_all_orders(sembol)
-    except:
-        pass
-    finally:
-        await borsa.close()
+    except: pass
+    finally: await borsa.close()
 
 async def acil_kapat(api_key, api_secret, coin, yon):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -101,19 +107,28 @@ async def acil_kapat(api_key, api_secret, coin, yon):
         await borsa.load_markets()
         hayalet_enjektor(borsa, sembol, coin)
         
-        pozisyonlar = await borsa.fetch_positions([sembol])
-        if pozisyonlar:
+        ters_yon = 'sell' if yon == 'LONG' else 'buy'
+        
+        for deneme in range(3):
+            pozisyonlar = await borsa.fetch_positions([sembol])
+            if not pozisyonlar: break
+                
             poz = pozisyonlar[0]
-            miktar = float(poz.get('contracts', 0) or poz.get('positionAmt', 0))
-            if miktar > 0:
-                ters_yon = 'sell' if yon == 'LONG' else 'buy'
-                await borsa.create_order(sembol, 'market', ters_yon, miktar, params={'reduceOnly': True})
+            # 🛡️ MUTLAK DEĞER ZIRHI (Short'lar için)
+            miktar = abs(float(poz.get('contracts', 0) or poz.get('positionAmt', 0)))
+            
+            if miktar <= 0: break 
+                
+            try:
+                # 🛡️ TAM SAYI (int) ZIRHI
+                await borsa.create_order(sembol, 'market', ters_yon, int(miktar), params={'reduceOnly': True})
+                break
+            except:
+                await asyncio.sleep(1.5)
         
         await borsa.cancel_all_orders(sembol)
-    except:
-        pass
-    finally:
-        await borsa.close()
+    except: pass
+    finally: await borsa.close()
 
 async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, stop_mode, fiyatlar):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
@@ -125,38 +140,56 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
         oranlar = [float(x) for x in tp_ratios.split(',')]
         hedef_oran = oranlar[asama - 2]
         
-        pozisyonlar = await borsa.fetch_positions([sembol])
-        if not pozisyonlar: return
-            
-        poz = pozisyonlar[0]
-        toplam_miktar = float(poz.get('contracts', 0) or poz.get('positionAmt', 0))
-        if toplam_miktar <= 0: return
-
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
-        
         onceki_satilan_toplam = sum(oranlar[:asama-2]) if asama > 2 else 0
         kalan_yuzde = 100.0 - onceki_satilan_toplam
         
-        if asama == 5 or kalan_yuzde <= 0 or (hedef_oran / kalan_yuzde) >= 0.99:
+        if asama == 5 or kalan_yuzde <= 0 or (hedef_oran / kalan_yuzde) >= 0.99: 
             gercek_satis_orani = 1.0 
-        else:
+        else: 
             gercek_satis_orani = hedef_oran / kalan_yuzde
+
+        # ⚔️ KISMİ KÂR ALMA (Zırhlı Versiyon)
+        for deneme in range(3):
+            pozisyonlar = await borsa.fetch_positions([sembol])
+            if not pozisyonlar: break
+                
+            poz = pozisyonlar[0]
             
-        kapatilacak_miktar = float(borsa.amount_to_precision(sembol, toplam_miktar * gercek_satis_orani))
-        
-        if kapatilacak_miktar > 0:
-            await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
+            # 🛡️ 1. HATA ÇÖZÜMÜ: Mutlak Değer (abs) -> Short işlemlerde miktar eksi gelirse diye
+            toplam_miktar = abs(float(poz.get('contracts', 0) or poz.get('positionAmt', 0)))
+            if toplam_miktar <= 0: break
+            
+            kapatilacak_miktar_ham = toplam_miktar * gercek_satis_orani
+            
+            # 🛡️ 2. HATA ÇÖZÜMÜ: Tam Sayı Zoru (int) -> MEXC buçuklu kontrat satmaz
+            kapatilacak_miktar = int(kapatilacak_miktar_ham)
+            
+            if kapatilacak_miktar < 1 and toplam_miktar >= 1:
+                kapatilacak_miktar = 1
+            
+            if kapatilacak_miktar > 0:
+                try:
+                    await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
+                    print(f"✅ {coin} - TP{asama-1} Vuruldu! ({kapatilacak_miktar} adet kontrat satıldı)")
+                    break
+                except Exception as e: 
+                    print(f"⚠️ {coin} Kısmi Satış Borsa Hatası: {e}")
+                    await asyncio.sleep(1)
+            else: 
+                break
 
         await asyncio.sleep(1)
+        
+        # 🛡️ STOP-LOSS KALKANI GÜNCELLEMESİ
         guncel_pozisyonlar = await borsa.fetch_positions([sembol])
         if not guncel_pozisyonlar: return
         
-        kalan_gercek_miktar = float(guncel_pozisyonlar[0].get('contracts', 0) or guncel_pozisyonlar[0].get('positionAmt', 0))
+        kalan_gercek_miktar = abs(float(guncel_pozisyonlar[0].get('contracts', 0) or guncel_pozisyonlar[0].get('positionAmt', 0)))
 
         if stop_mode != 'NONE' and kalan_gercek_miktar > 0:
             yeni_sl = None
-            if stop_mode == 'BREAKEVEN' and asama >= 2:
-                yeni_sl = fiyatlar['giris']
+            if stop_mode == 'BREAKEVEN' and asama >= 2: yeni_sl = fiyatlar['giris']
             elif stop_mode == 'MOVING':
                 if asama == 2: yeni_sl = fiyatlar['giris']
                 elif asama == 3: yeni_sl = fiyatlar['tp1']
@@ -165,17 +198,20 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
 
             if yeni_sl:
                 yeni_sl_hassas = float(borsa.price_to_precision(sembol, yeni_sl))
-                
-                await borsa.cancel_all_orders(sembol)
-                await borsa.create_order(
-                    symbol=sembol, 
-                    type='market', 
-                    side=ters_yon, 
-                    amount=float(borsa.amount_to_precision(sembol, kalan_gercek_miktar)), 
-                    params={'triggerPrice': yeni_sl_hassas, 'reduceOnly': True}
-                )
+                try:
+                    await borsa.cancel_all_orders(sembol)
+                    await borsa.create_order(
+                        symbol=sembol, 
+                        type='market', 
+                        side=ters_yon, 
+                        amount=int(kalan_gercek_miktar), 
+                        params={'triggerPrice': yeni_sl_hassas, 'reduceOnly': True}
+                    )
+                    print(f"🛡️ {coin} Kalkan (Stop-Loss) {yeni_sl} seviyesine çekildi.")
+                except Exception as e: 
+                    print(f"⚠️ {coin} Stop Güncelleme Hatası: {e}")
 
-    except Exception as e:
-        print(f"Hata (Kısmi Kar/Stop Güncelleme): {e}")
-    finally:
+    except Exception as e: 
+        print(f"⚠️ {coin} Pozisyon Güncelleme Ana Hata: {e}")
+    finally: 
         await borsa.close()
