@@ -43,7 +43,11 @@ def init_db():
             katilanlar TEXT DEFAULT '',
             rsi_degeri REAL DEFAULT 0.0,
             macd_degeri REAL DEFAULT 0.0,
-            hacim_degeri REAL DEFAULT 0.0
+            hacim_degeri REAL DEFAULT 0.0,
+            atr REAL DEFAULT 0.0,
+            fear_greed INTEGER DEFAULT 50,
+            en_iyi_fiyat REAL DEFAULT 0.0,
+            mum_gecmisi TEXT DEFAULT '[]'
         )
     ''')
     cursor.execute('''
@@ -59,21 +63,14 @@ def init_db():
         )
     ''')
     
-    # Eski veritabanını bozmadan yeni Yapay Zeka sütunlarını enjekte et
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
+    # Yeni odaları eski tabloya enjekte et
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN atr REAL DEFAULT 0.0")
     except: pass
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN fear_greed INTEGER DEFAULT 50")
     except: pass
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN kaldirac INTEGER DEFAULT 20")
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN en_iyi_fiyat REAL DEFAULT 0.0")
     except: pass
-    try: cursor.execute("ALTER TABLE user_daily_stats ADD COLUMN be_adet INTEGER DEFAULT 0")
-    except: pass
-    # 🧠 YAPAY ZEKA VERİ MADENCİLİĞİ SÜTUNLARI (İSİMLER EŞİTLENDİ)
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN rsi_degeri REAL DEFAULT 0.0")
-    except: pass
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN macd_degeri REAL DEFAULT 0.0")
-    except: pass
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN hacim_degeri REAL DEFAULT 0.0")
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN mum_gecmisi TEXT DEFAULT '[]'")
     except: pass
     
     conn.commit()
@@ -131,15 +128,16 @@ def get_all_active_users():
     conn.close()
     return users
 
-# 🧠 KAYIT FONKSİYONUNA RSI, MACD VE HACIM PARAMETRELERİ EKLENDİ (İSİMLER EŞİTLENDİ)
-def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi_degeri=0.0, macd_degeri=0.0, hacim_degeri=0.0):
+def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi=0.0, macd=0.0, hacim=0.0, atr=0.0, fng=50, mum_video='[]'):
     conn = get_connection()
     cursor = conn.cursor()
     su_an = time.time()
+    # İlk kayıt anında en iyi fiyat, giriş fiyatıdır
     cursor.execute('''
-        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi_degeri, macd_degeri, hacim_degeri) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?, ?, ?, ?)
-    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi_degeri, macd_degeri, hacim_degeri))
+        INSERT INTO active_signals 
+        (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi_degeri, macd_degeri, hacim_degeri, atr, fear_greed, en_iyi_fiyat, mum_gecmisi) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi, macd, hacim, atr, fng, giris, mum_video))
     signal_id = cursor.lastrowid
     conn.commit()
     conn.close()
