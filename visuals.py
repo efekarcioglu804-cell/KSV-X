@@ -1,46 +1,76 @@
 import matplotlib.pyplot as plt
-import numpy as np
+import datetime
 import os
 
 def create_pnl_image(acilan, tps, stops, bes, kar, trade_mode):
-    # Wall Street Karanlık Teması
+    # 🎨 PREMİUM PİTCH-BLACK (SİMFİYAH) VIP TEMASI
     plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(7, 5))
-    fig.patch.set_facecolor('#121212')
-    ax.set_facecolor('#121212')
-
-    # Veriler
-    labels = ['Başarılı (TP)', 'Zarar (STOP)', 'Zararsız (BE)']
+    fig, ax = plt.subplots(figsize=(10, 7.5), facecolor='#050505') # Saf siyah arkaplan
+    ax.set_facecolor('#050505')
+    
+    # 📊 Veriler ve Etiketler
+    labels = ['BAŞARILI\n(TP)', 'ZARAR\n(STOP)', 'ZARARSIZ\n(BE)']
     values = [tps, stops, bes]
-    colors = ['#00e676', '#ff1744', '#ffea00'] # Yeşil, Kırmızı, Sarı
-
-    bars = ax.bar(labels, values, color=colors, width=0.5, edgecolor='#333333', linewidth=1)
-
-    # Başlıklar
-    ax.set_title('KSVIX GÜNLÜK BİLANÇO GRAFİĞİ', color='#d4af37', fontsize=14, fontweight='bold', pad=20)
-    ax.set_ylabel('İşlem Sayısı', color='#aaaaaa')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#555555')
-    ax.spines['bottom'].set_color('#555555')
-
-    # Barların Üzerine Rakamları Yazma
+    
+    # 💥 NEON RENKLER (Siberpunk & Wall Street Karışımı)
+    colors = ['#00FF87', '#FF003C', '#FFD700'] # Neon Yeşil, Kan Kırmızı, Saf Altın
+    
+    # 1. KATMAN: GLOW (Parlama) EFEKTİ (Arkaya hafif geniş ve saydam barlar çiziyoruz)
+    ax.bar(labels, values, color=colors, width=0.65, alpha=0.15, edgecolor='none')
+    
+    # 2. KATMAN: ANA SÜTUNLAR (İnce, keskin ve beyaz çerçeveli)
+    bars = ax.bar(labels, values, color=colors, width=0.45, edgecolor='#FFFFFF', linewidth=1.5, alpha=0.95)
+    
+    # 🏆 RAKAMLAR SÜTUNLARIN ÜSTÜNDE (Büyük ve Gösterişli)
     for bar in bars:
-        yval = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2, yval + 0.1, int(yval), ha='center', color='white', fontweight='bold', fontsize=12)
-
-    # Net Kar / Zarar Metnini Alt Kısma Şık Bir Kutuyla Ekleme
-    pnl_text = f"Net Kasa Değişimi: {kar:+.2f} USDT" if trade_mode == 'FIXED' else f"Net Kasa Büyümesi: % {kar:+.2f}"
-    color_pnl = '#00e676' if kar > 0 else '#ff1744' if kar < 0 else '#ffffff'
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + (max(values)*0.03 if max(values) > 0 else 0.1),
+                f'{int(height)}',
+                ha='center', va='bottom', color='white', fontweight='heavy', fontsize=22)
     
-    plt.figtext(0.5, 0.03, pnl_text, ha="center", fontsize=13, fontweight='bold', color=color_pnl, 
-                bbox=dict(facecolor='#1e1e1e', edgecolor=color_pnl, boxstyle='round,pad=0.8', linewidth=2))
-
+    # 📏 ARKA PLAN ÇİZGİLERİ (Sadece hafif yatay çizgiler)
+    ax.yaxis.grid(True, linestyle='--', alpha=0.1, color='#FFFFFF')
+    ax.xaxis.grid(False)
+    
+    # Çirkin dış çerçeveyi tamamen sil
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+        
+    ax.tick_params(colors='#A1A1AA', labelsize=14, length=0, pad=10) 
+    
+    # 👑 DEVASA FİLİGRAN (SU DAMGASI) Arka plana silik şekilde yazılacak
+    fig.text(0.5, 0.45, '👑 KRALIN SİNYALLERİ VİP 👑', 
+             fontsize=40, color='#FFD700', alpha=0.04, ha='center', va='center', rotation=12, fontweight='heavy')
+    
+    # 👑 BAŞLIKLAR VE HEYECAN YARATAN SLOGANLAR
+    tarih = datetime.datetime.now().strftime('%d %B %Y')
+    
+    # Ana Başlık
+    plt.suptitle('👑 KSVİX OTONOM BİLANÇO MERKEZİ 👑', color='#FFD700', fontweight='heavy', fontsize=24, y=0.95)
+    
+    # Alt Başlık ve VIP Sloganı
+    slogan = f"Tarih: {tarih}   |   Toplam Operasyon: {acilan}\n⚔️ Duygusuz. Kusursuz. Kazançlı. ⚔️"
+    plt.title(slogan, color='#D4D4D8', fontsize=14, pad=20, style='italic')
+    
+    # 💰 DEVASA NET KÂR KUTUSU (En altta parlayan bölüm)
+    kar_metni = f"+{kar:.2f} USDT" if kar > 0 else f"{kar:.2f} USDT"
+    if trade_mode != 'FIXED':
+        kar_metni = f"% +{kar:.2f}" if kar > 0 else f"% {kar:.2f}"
+        
+    box_color = '#00FF87' if kar > 0 else '#FF003C' if kar < 0 else '#A1A1AA'
+    box_text = f"💰 NET KASA BÜYÜMESİ: {kar_metni} 💰"
+    
+    bbox_props = dict(boxstyle="square,pad=0.9", facecolor='#0A0A0A', edgecolor=box_color, linewidth=2.5)
+    plt.figtext(0.5, 0.06, box_text, ha="center", va="center", 
+                fontsize=18, fontweight='heavy', color=box_color, bbox=bbox_props)
+    
+    # Düzeni sıkıştırıp hizala
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.2) # Kutunun sığması için alt boşluk
+    plt.subplots_adjust(bottom=0.22, top=0.78) 
     
-    filepath = 'daily_pnl.png'
-    plt.savefig(filepath, dpi=200, facecolor=fig.get_facecolor(), edgecolor='none')
+    # 🚀 YÜKSEK ÇÖZÜNÜRLÜKLÜ (300 DPI) KAYIT
+    img_path = 'gunluk_bilanco.png'
+    plt.savefig(img_path, dpi=300, facecolor=fig.get_facecolor(), edgecolor='none', bbox_inches='tight')
     plt.close()
     
-    return filepath
+    return img_path
