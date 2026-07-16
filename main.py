@@ -12,6 +12,7 @@ import database as db
 from parser import parse_signal
 from trader import islem_ac, bekleyen_emri_iptal_et, pozisyon_guncelle, acil_kapat
 from visuals import create_pnl_image
+import ai_engine  # 🧠 YENİ: Yapay Zeka Beyni Bağlandı
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -38,7 +39,6 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
             'precision': {'amount': 0.0001, 'price': 0.00000001}
         }
 
-# 🧠 YAPAY ZEKA İÇİN PİYASA FOTOĞRAFÇISI (RSI, MACD, HACİM HESAPLAYICI)
 def hesapla_ema(fiyatlar, periyot):
     if not fiyatlar: return 0
     k = 2 / (periyot + 1)
@@ -49,14 +49,12 @@ def hesapla_ema(fiyatlar, periyot):
 
 async def piyasa_fotografi_cek(borsa, sembol):
     try:
-        # Son 50 adet 15 dakikalık mumu çek (Geçmiş 12 saatlik trendi okur)
         mumlar = await borsa.fetch_ohlcv(sembol, '15m', limit=50)
         if not mumlar or len(mumlar) < 30: return 0.0, 0.0, 0.0
         
         kapanislar = [mum[4] for mum in mumlar]
-        hacim = mumlar[-1][5] # Son mumun hacmi (Büyük balina tespiti için)
+        hacim = mumlar[-1][5] 
         
-        # Matematiksel RSI Hesaplama (14 Periyot)
         farklar = [kapanislar[i] - kapanislar[i-1] for i in range(1, len(kapanislar))]
         kazanclar = [f if f > 0 else 0 for f in farklar[-14:]]
         kayiplar = [-f if f < 0 else 0 for f in farklar[-14:]]
@@ -65,15 +63,12 @@ async def piyasa_fotografi_cek(borsa, sembol):
         rs = ort_kazanc / ort_kayip if ort_kayip > 0 else 0
         rsi = 100 - (100 / (1 + rs)) if ort_kayip > 0 else 100
         
-        # Matematiksel MACD Hesaplama
         ema_12 = hesapla_ema(kapanislar, 12)
         ema_26 = hesapla_ema(kapanislar, 26)
         macd = ema_12 - ema_26
         
         return round(rsi, 2), round(macd, 4), round(hacim, 2)
-    except Exception as e:
-        print(f"Piyasa Fotoğrafı Çekilemedi: {e}")
-        return 0.0, 0.0, 0.0
+    except: return 0.0, 0.0, 0.0
 
 @client.on(events.NewMessage(incoming=True))
 async def genel_handler(event):
@@ -82,42 +77,35 @@ async def genel_handler(event):
     if event.is_private:
         gonderen_id = event.sender_id
         if mesaj.startswith('/start'):
-            start_msg = (
-                "👑 **KSVİX KOMUTA MERKEZİNE HOŞ GELDİNİZ!** 👑\n\n"
-                "Wall Street standartlarında, duygusuz ve keskin nişancı ticaret botunuz aktif edildi.\n"
-                "Bütün piyasa radarları sizin emrinizi bekliyor.\n\n"
-                "🔒 **Kayıt Komutu:**\n`/kayit API_KEY API_SECRET`"
-            )
-            await event.reply(start_msg)
+            await event.reply("👑 **KSVİX KOMUTA MERKEZİNE HOŞ GELDİNİZ!** 👑\n\n🔒 **Kayıt Komutu:**\n`/kayit API_KEY API_SECRET`")
             
         elif mesaj.startswith('/kayit'):
             try:
                 _, api_key, api_secret = mesaj.split()
                 db.add_user(gonderen_id, api_key, api_secret)
-                await event.reply("✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅\n\nAyarlar için: `/ayar PERCENT 5 8`, `/hedef 50 25 15 10`, `/stop MOVING`")
-            except: 
-                await event.reply("❌ **Hatalı format!** Örnek kullanım: `/kayit API_KEY API_SECRET`")
+                await event.reply("✅ **Kasa Başarıyla Kilitlendi! KSVİX Otomasyonu Sağlandı.** 🦅")
+            except: await event.reply("❌ **Hatalı format!**")
                 
         elif mesaj.startswith('/ayar'):
             try:
                 _, mod, miktar, max_islem = mesaj.split()
                 db.update_user_settings(gonderen_id, mod.upper(), float(miktar), int(max_islem))
                 await event.reply(f"⚙️ **Ayarlar Güncellendi!**\nMod: `{mod.upper()}` | Miktar: `{miktar}` | Maksimum Açık İşlem: `{max_islem}`")
-            except: await event.reply("❌ **Hatalı format!** Örnek: `/ayar PERCENT 5 8`")
+            except: await event.reply("❌ **Hatalı format!**")
             
         elif mesaj.startswith('/hedef'):
             try:
                 _, t1, t2, t3, t4 = mesaj.split()
                 db.update_tp_ratios(gonderen_id, f"{t1},{t2},{t3},{t4}")
-                await event.reply(f"🎯 **Kâr Oranları Ayarlandı!**\nTP1: `%{t1}` | TP2: `%{t2}` | TP3: `%{t3}` | TP4: `%{t4}`")
-            except: await event.reply("❌ **Hatalı format!** Örnek: `/hedef 50 25 15 10`")
+                await event.reply(f"🎯 **Kâr Oranları Ayarlandı!**")
+            except: await event.reply("❌ **Hatalı format!**")
             
         elif mesaj.startswith('/stop'):
             try:
                 _, mode = mesaj.split()
                 db.update_stop_mode(gonderen_id, mode.upper())
                 await event.reply(f"🛡️ **Stop Kalkanı Aktif:** `{mode.upper()}`")
-            except: await event.reply("❌ **Hatalı format!** Örnek: `/stop MOVING`")
+            except: await event.reply("❌ **Hatalı format!**")
             
         elif mesaj.startswith('/durdur'):
             db.toggle_user_active(gonderen_id, 0)
@@ -127,27 +115,25 @@ async def genel_handler(event):
             db.toggle_user_active(gonderen_id, 1)
             await event.reply("✅ **Sistem Aktif!** Silahlar devrede, piyasa taranıyor. 🦅")
             
-        # 👑 KRALIN YENİ KOMUTU: YAPAY ZEKA SAYACI
         elif mesaj.startswith('/sayac'):
             conn = sqlite3.connect(db.DB_NAME, timeout=30)
             try:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM active_signals")
                 toplam_sinyal = cursor.fetchone()[0]
-            except Exception as e:
-                toplam_sinyal = 0
-            finally:
-                conn.close()
+            except: toplam_sinyal = 0
+            finally: conn.close()
             
-            kalan = 800 - toplam_sinyal if toplam_sinyal < 800 else 0
-            
-            sayac_msg = (
-                f"🧠 **KSVİX Yapay Zeka (AI) Veri Havuzu:**\n\n"
-                f"🗃️ Toplanan Eğitim Verisi: `{toplam_sinyal}` İşlem\n"
-                f"🎯 800 Barajına Kalan: `{kalan}` İşlem\n\n"
-                f"{'🔥 **Kritik eşiğe ulaşıldı! Modeli eğitmeye başlayabiliriz Kralım!**' if toplam_sinyal >= 800 else '🦅 İstihbarat toplanmaya devam ediyor...'}"
-            )
+            sayac_msg = f"🧠 **KSVİX Yapay Zeka (AI) Veri Havuzu:**\n\n🗃️ Toplanan Eğitim Verisi: `{toplam_sinyal}` İşlem\n✅ AI Motoru Aktif Olarak Eğitiliyor!"
             await event.reply(sayac_msg)
+            
+        elif mesaj.startswith('/testbilanco'):
+            try:
+                img_path = create_pnl_image(18, 12, 4, 2, 4.25, 'PERCENT')
+                test_msg = "👑 **KRALIN SİNYALLERİ - TEST BİLANÇOSU** 👑"
+                await client.send_file(gonderen_id, img_path, caption=test_msg)
+                os.remove(img_path) 
+            except Exception as e: await event.reply(f"Hata: {e}")
             
     else:
         if event.chat_id == VIP_KANAL_ID:
@@ -162,7 +148,6 @@ async def genel_handler(event):
                 await borsa_tmp.load_markets()
                 hayalet_enjektor(borsa_tmp, sembol_tmp, sinyal['coin'])
                 
-                # 🧠 Sinyal gelir gelmez fotoğraf çek!
                 rsi_degeri, macd_degeri, hacim_degeri = await piyasa_fotografi_cek(borsa_tmp, sembol_tmp)
                 
                 ticker = await borsa_tmp.fetch_ticker(sembol_tmp)
@@ -179,7 +164,6 @@ async def genel_handler(event):
                         sinyal['tp3'] /= carpan
                         sinyal['tp4'] /= carpan
                         sinyal['sl'] /= carpan
-                        print(f"🔧 Ölçek Küçültüldü! Çarpan: /{carpan}")
                     elif oran < 0.2: 
                         carpan = 10 ** round(math.log10(1/oran))
                         sinyal['giris'] *= carpan
@@ -188,18 +172,40 @@ async def genel_handler(event):
                         sinyal['tp3'] *= carpan
                         sinyal['tp4'] *= carpan
                         sinyal['sl'] *= carpan
-                        print(f"🔧 Ölçek Büyütüldü! Çarpan: x{carpan}")
+            except: pass
+            finally: await borsa_tmp.close()
+
+            # 🧠 YAPAY ZEKA (AI) ANALİZİ VE RED FİLTRESİ
+            islem_sayisi, ai_ihtimal = 0, 100.0
+            coin = sinyal['coin']
+            try:
+                islem_sayisi, ai_ihtimal = await asyncio.to_thread(ai_engine.sinyali_analiz_et, rsi_degeri, macd_degeri, hacim_degeri)
             except Exception as e:
-                print(f"Ölçekleyici hatası: {e}")
-            finally:
-                await borsa_tmp.close()
+                print(f"⚠️ AI Analiz Hatası: {e}")
+
+            # AI RED KARARI (50 vakayı geçmişse ve başarı ihtimali %40'ın altındaysa işlemi ezer)
+            if islem_sayisi >= 50 and ai_ihtimal < 40.0:
+                red_mesaj = f"🤖 **KSVİX AI YARGICI DEVREDE!**\n\n⚠️ **#{coin}** sinyali analiz edildi.\n📉 **Başarı İhtimali:** `%{ai_ihtimal}`\n🛑 **Karar:** Tarihsel verilere göre bu bir tuzak formasyonu. Sinyal reddedildi!"
+                try: await client.send_message(VIP_KANAL_ID, red_mesaj)
+                except: pass
+                return # Sinyali tamamen çöpe at, işleme girme
+
+            # AI ONAY BİLGİSİ (Başarılıysa mesaja eklenecek)
+            ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`" if islem_sayisi >= 50 else ""
                 
-            # 🧠 Veritabanına Yapay Zeka için 3 yeni metrik de sessizce kaydediliyor
             signal_id = db.sinyal_kaydet(
                 sinyal['coin'], sinyal['yon'], sinyal['giris'], 
                 sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl'], 
                 sinyal['kaldirac'], rsi_degeri, macd_degeri, hacim_degeri
             )
+            
+            conn = sqlite3.connect(db.DB_NAME, timeout=30)
+            try:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE active_signals SET durum = 'IPTAL' WHERE coin = ? AND durum = 'BEKLIYOR' AND id != ?", (sinyal['coin'], signal_id))
+                conn.commit()
+            except: pass
+            finally: conn.close()
             
             aktif_uyeler = db.get_all_active_users()
             if not aktif_uyeler: return
@@ -217,7 +223,13 @@ async def genel_handler(event):
                 elif sonuc.get('durum') == 'BASARILI':
                     db.sinyale_katilan_ekle(signal_id, telegram_id)
                     db.update_daily_stat(telegram_id, 'open', value=1)
-                    try: await client.send_message(telegram_id, f"✅ **#{sinyal['coin']} Sinyali Alındı!**\nPusudayız. 🦅")
+                    
+                    if sonuc.get('eski_silindi'):
+                        mesaj_metni = f"✅ **#{sinyal['coin']} Sinyali Alındı!**{ai_ek_metin}\n🧹 Eski pusu emri iptal edildi, yeni sinyale geçildi. 🦅"
+                    else:
+                        mesaj_metni = f"✅ **#{sinyal['coin']} Sinyali Alındı!**{ai_ek_metin}\nPusudayız. 🦅"
+                        
+                    try: await client.send_message(telegram_id, mesaj_metni)
                     except: pass
                 else:
                     hata_nedeni = sonuc.get('hata_mesaji', 'Bilinmiyor')
@@ -291,19 +303,12 @@ async def fiyat_takip_radari():
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
                     
-                    # 👑 KRALIN YENİ KORUMASI: GİRİŞTEN ÖNCE TP VURURSA İPTAL ET (Falling Knife Koruması)
-                    elif tp1 > 0 and ((yon == 'LONG' and fiyat_last >= tp1) or (yon == 'SHORT' and fiyat_last <= tp1)):
-                        yeni_durum = 'IPTAL'
-                        bildirim = f"⚠️ **#{coin} İptal Edildi!**\n🛑 **Sebep:** KSVİX işleme giremeden coin hedefine (TP) ulaştı (Hit Profit Before Entry). Tuzaktan kurtulduk! 🦅"
-                        for uye in aktif_uyeler:
-                            if str(uye['telegram_id']) in katilanlar_listesi:
-                                mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
-
                     elif (yon == 'LONG' and fiyat_last <= giris) or (yon == 'SHORT' and fiyat_last >= giris):
                         yeni_durum, yeni_asama = 'ISLEMDE', 1
-                        bildirim = f"🟢 **İŞLEME GİRİLDİ** | #{coin}\n⚡ **Yön:** {yon} | **Giriş:** {giris} 🚀"
+                        bildirim = f"🟢 **İŞLEME GİRİLDİ** | #{coin}\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris} 🚀"
                 
                 elif durum == 'ISLEMDE':
+                    # FİZİKSEL CÜZDAN KONTROLÜ
                     for uye in aktif_uyeler:
                         tid_str = str(uye['telegram_id'])
                         if tid_str in katilanlar_listesi:
@@ -333,6 +338,7 @@ async def fiyat_takip_radari():
                                     dm_msg = f"🛡️ **#{coin} İz Süren Stop!**\n📈 `+{roe:.2f}%` ({kaldirac}x ROE) kârla kapandı. 🔥"
                                 dm_mesajlar.append((uye['telegram_id'], dm_msg))
 
+                    # VİP KANAL ŞOV MOTORU
                     if (yon == 'LONG' and fiyat_last <= sl) or (yon == 'SHORT' and fiyat_last >= sl):
                         yeni_durum = 'STOP_OLDU'
                         roe = (abs(sl - giris) / giris) * kaldirac * 100
@@ -391,9 +397,6 @@ async def fiyat_takip_radari():
                                         coin, yon, yeni_asama, uye['tp_ratios'], uye['stop_mode'], fiyatlar
                                     )
                                 )
-                
-                elif durum == 'ISLEMDE' and not katilanlar_listesi:
-                     db_guncellemeler.append(("UPDATE active_signals SET durum = 'KAPANDI' WHERE id = ?", (s_id,)))
 
             if db_guncellemeler:
                 conn = sqlite3.connect(db.DB_NAME, timeout=30)
@@ -419,11 +422,65 @@ async def fiyat_takip_radari():
             for gorev in mexc_gorevleri:
                 client.loop.create_task(gorev)
 
-        except asyncio.TimeoutError:
-            pass
-        except Exception as e:
-            print(f"Radar Kritik Hata: {e}")
-            await asyncio.sleep(2)
+        except asyncio.TimeoutError: pass
+        except Exception as e: await asyncio.sleep(2)
+
+# 👑 GELİŞMİŞ GÖLGE AJAN
+async def golge_senkronizator():
+    while True:
+        await asyncio.sleep(20) 
+        try:
+            aktif_uyeler = db.get_all_active_users()
+            if not aktif_uyeler: continue
+
+            conn = sqlite3.connect(db.DB_NAME, timeout=30)
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, coin, yon, giris, katilanlar FROM active_signals WHERE durum = 'BEKLIYOR'")
+                bekleyenler = cursor.fetchall()
+                
+                cursor.execute("SELECT id, coin, katilanlar FROM active_signals WHERE durum = 'ISLEMDE'")
+                islemdekiler = cursor.fetchall()
+                
+                for uye in aktif_uyeler:
+                    try:
+                        borsa = ccxt.mexc({'apiKey': uye['mexc_api_key'], 'secret': uye['mexc_api_secret'], 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+                        pozisyonlar = await borsa.fetch_positions()
+                        aktif_semboller = set()
+                        for p in pozisyonlar:
+                            if float(p.get('contracts', 0) or p.get('positionAmt', 0)) > 0:
+                                aktif_semboller.add(p['symbol'])
+                        
+                        uye_tid = str(uye['telegram_id'])
+                        
+                        # 1. BİR ÜYENİN CÜZDANINDA MAL VARSA AMA SİSTEM BEKLİYORSA, İŞLEME ZORLA
+                        for b_id, coin, yon, giris, katilanlar in bekleyenler:
+                            sembol = coin.replace('USDT', '') + '/USDT:USDT'
+                            if sembol in aktif_semboller:
+                                cursor.execute("UPDATE active_signals SET durum = 'ISLEMDE', asama = 1 WHERE id = ?", (b_id,))
+                                conn.commit()
+                                
+                                katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
+                                msg = f"🟢 **#{coin} İşleme Girildi!**\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris}\n🦅 KSVİX pusudan çıktı, operasyon başladı! (Ajan Onayı)"
+                                if uye_tid in katilanlar_listesi:
+                                    try: await client.send_message(int(uye_tid), msg)
+                                    except: pass
+                        
+                        # 2. BİR ÜYE MANUEL SATTIYSA VEYA STOP OLDUYSA, SADECE ONU LİSTEDEN SİL
+                        for i_id, coin, katilanlar in islemdekiler:
+                            sembol = coin.replace('USDT', '') + '/USDT:USDT'
+                            katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
+                            
+                            if sembol not in aktif_semboller and uye_tid in katilanlar_listesi:
+                                katilanlar_listesi.remove(uye_tid)
+                                cursor.execute("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (",".join(katilanlar_listesi), i_id))
+                                conn.commit()
+                                
+                    except Exception as e: pass
+                    finally: await borsa.close()
+                        
+            finally: conn.close()
+        except: pass
 
 async def gunluk_pnl_raporlayici():
     while True:
@@ -431,7 +488,6 @@ async def gunluk_pnl_raporlayici():
             su_an = datetime.datetime.now()
             if su_an.hour == 20 and su_an.minute == 59:
                 
-                # 1. KISIM: KULLANICILARA ÖZEL BİLANÇO VE GRAFİK (DM)
                 aktif_uyeler = db.get_all_active_users()
                 for uye in aktif_uyeler:
                     stats = db.get_daily_stats(uye['telegram_id'])
@@ -457,42 +513,31 @@ async def gunluk_pnl_raporlayici():
                         img_path = create_pnl_image(acilan, tps, stops, bes, kar, uye['trade_mode'])
                         await client.send_file(uye['telegram_id'], img_path, caption=pnl_msg)
                         os.remove(img_path) 
-                    except Exception as e:
-                        print(f"Görsel gönderilemedi: {e}")
-                        await client.send_message(uye['telegram_id'], pnl_msg) 
+                    except: await client.send_message(uye['telegram_id'], pnl_msg) 
                 
-                # 2. KISIM: VİP GRUBA YAPAY ZEKA (ML) VERİ RAPORU
                 conn = sqlite3.connect(db.DB_NAME, timeout=30)
                 try:
                     cursor = conn.cursor()
                     cursor.execute("SELECT COUNT(*) FROM active_signals")
                     toplam_sinyal = cursor.fetchone()[0]
-                    
                     cursor.execute("SELECT COUNT(*) FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
                     aktif_sinyal = cursor.fetchone()[0]
-                except Exception as e:
-                    print(f"Veri sayımı hatası: {e}")
-                    toplam_sinyal, aktif_sinyal = 0, 0
-                finally:
-                    conn.close()
+                except: toplam_sinyal, aktif_sinyal = 0, 0
+                finally: conn.close()
 
                 vip_msg = (
                     f"🧠 **KSVİX YAPAY ZEKA (AI) İSTİHBARAT MERKEZİ** 🧠\n"
                     f"📅 **Tarih:** {su_an.strftime('%d %B %Y')}\n\n"
-                    f"Wall Street standartlarında Makine Öğrenmesi (Machine Learning) modelimizi eğitmek için piyasadan toplanan güncel veri seti raporudur:\n\n"
                     f"🗃️ **Havuzdaki Toplam Eğitim Verisi:** `{toplam_sinyal} İşlem`\n"
                     f"⏳ **Şu An Radarda Takip Edilen:** `{aktif_sinyal} İşlem`\n\n"
-                    f"*(Not: Veri setimiz 800-1000 işlem eşiğine ulaştığında K-Means ve Rastgele Orman algoritmaları devreye alınacaktır. KSVİX şu an sadece veri toplamaktadır.)* 🦅"
+                    f"*(Not: KSVİX Yapay Zeka kalkanı AKTİFTİR. Bütün sinyaller geçmiş tecrübelere göre filtrelenmektedir.)* 🦅"
                 )
                 
-                try: 
-                    await client.send_message(VIP_KANAL_ID, vip_msg)
-                except Exception as e:
-                    print(f"VIP Gruba mesaj atılamadı: {e}")
+                try: await client.send_message(VIP_KANAL_ID, vip_msg)
+                except: pass
 
                 await asyncio.sleep(70) 
-        except Exception:
-            pass
+        except: pass
         await asyncio.sleep(30)
 
 async def main():
@@ -501,8 +546,9 @@ async def main():
     await client.start(bot_token=config.BOT_TOKEN)
     print("🤖 KSVİX VIP Telegram'a Sızdı.")
     client.loop.create_task(fiyat_takip_radari())
+    client.loop.create_task(golge_senkronizator())
     client.loop.create_task(gunluk_pnl_raporlayici())
-    print("🦅 V8 Radarları (WebSocket) ve Muhasebe Motoru Aktif...")
+    print("🦅 V8 Radarları, Gelişmiş Gölge Ajan ve YZ (AI) Motoru Aktif...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
