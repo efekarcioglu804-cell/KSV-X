@@ -64,6 +64,20 @@ def init_db():
     ''')
     
     # Yeni odaları eski tabloya enjekte et
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN kaldirac INTEGER DEFAULT 20")
+    except: pass
+    try: cursor.execute("ALTER TABLE user_daily_stats ADD COLUMN be_adet INTEGER DEFAULT 0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN rsi_degeri REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN macd_degeri REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN hacim_degeri REAL DEFAULT 0.0")
+    except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN atr REAL DEFAULT 0.0")
     except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN fear_greed INTEGER DEFAULT 50")
