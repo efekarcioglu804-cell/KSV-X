@@ -41,9 +41,9 @@ def init_db():
             asama INTEGER DEFAULT 0,
             eklenme_zamani REAL,
             katilanlar TEXT DEFAULT '',
-            rsi REAL DEFAULT 0.0,
-            macd REAL DEFAULT 0.0,
-            hacim REAL DEFAULT 0.0
+            rsi_degeri REAL DEFAULT 0.0,
+            macd_degeri REAL DEFAULT 0.0,
+            hacim_degeri REAL DEFAULT 0.0
         )
     ''')
     cursor.execute('''
@@ -68,12 +68,12 @@ def init_db():
     except: pass
     try: cursor.execute("ALTER TABLE user_daily_stats ADD COLUMN be_adet INTEGER DEFAULT 0")
     except: pass
-    # 🧠 YAPAY ZEKA VERİ MADENCİLİĞİ SÜTUNLARI
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN rsi REAL DEFAULT 0.0")
+    # 🧠 YAPAY ZEKA VERİ MADENCİLİĞİ SÜTUNLARI (İSİMLER EŞİTLENDİ)
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN rsi_degeri REAL DEFAULT 0.0")
     except: pass
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN macd REAL DEFAULT 0.0")
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN macd_degeri REAL DEFAULT 0.0")
     except: pass
-    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN hacim REAL DEFAULT 0.0")
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN hacim_degeri REAL DEFAULT 0.0")
     except: pass
     
     conn.commit()
@@ -131,15 +131,15 @@ def get_all_active_users():
     conn.close()
     return users
 
-# 🧠 KAYIT FONKSİYONUNA RSI, MACD VE HACIM PARAMETRELERİ EKLENDİ
-def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi=0.0, macd=0.0, hacim=0.0):
+# 🧠 KAYIT FONKSİYONUNA RSI, MACD VE HACIM PARAMETRELERİ EKLENDİ (İSİMLER EŞİTLENDİ)
+def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi_degeri=0.0, macd_degeri=0.0, hacim_degeri=0.0):
     conn = get_connection()
     cursor = conn.cursor()
     su_an = time.time()
     cursor.execute('''
-        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi, macd, hacim) 
+        INSERT INTO active_signals (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi_degeri, macd_degeri, hacim_degeri) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?, ?, ?, ?)
-    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi, macd, hacim))
+    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi_degeri, macd_degeri, hacim_degeri))
     signal_id = cursor.lastrowid
     conn.commit()
     conn.close()
