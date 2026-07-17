@@ -233,7 +233,6 @@ async def genel_handler(event):
                 
             sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
             
-            # 🔥 SUSTURUCULAR SÖKÜLDÜ! HATALAR EKRANA BASILACAK 🔥
             for uye, sonuc in zip(aktif_uyeler, sonuclar):
                 telegram_id = uye['telegram_id']
                 if isinstance(sonuc, Exception): 
@@ -272,7 +271,7 @@ async def fiyat_takip_radari():
     while True:
         try:
             su_an = time.time()
-            if su_an - son_db_okuma >= 2:
+            if su_an - son_db_okuma >= 0.5:
                 conn = sqlite3.connect(db.DB_NAME, timeout=30)
                 try:
                     cursor = conn.cursor()
@@ -283,7 +282,7 @@ async def fiyat_takip_radari():
                     conn.close()
             
             if not bekleyenler:
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
                 continue
 
             sembol_map, semboller = {}, []
@@ -293,7 +292,17 @@ async def fiyat_takip_radari():
                 semboller.append(sembol)
                 sembol_map[sembol] = sinyal
             
-            tickers = await asyncio.wait_for(borsa_ws.watch_tickers(semboller), timeout=2.0)
+            # --- KSVİX VIP WEBSOCKET (CANLI YAYIN) BYPASS MOTORU ---
+            async def tekli_canli_yayin(s):
+                try: return s, await borsa_ws.watch_ticker(s)
+                except: return s, None
+
+            ws_gorevler = [tekli_canli_yayin(s) for s in semboller]
+            ws_sonuclar = await asyncio.wait_for(asyncio.gather(*ws_gorevler), timeout=2.0)
+            
+            tickers = {s: t for s, t in ws_sonuclar if t}
+            # --------------------------------------------------------
+            
             aktif_uyeler = db.get_all_active_users()
             
             db_guncellemeler = []
@@ -499,7 +508,7 @@ async def fiyat_takip_radari():
         except asyncio.TimeoutError: pass
         except Exception as e: 
             print(f"🛑 RADAR GENEL DÖNGÜ HATASI: {e}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.5)
 
 async def golge_senkronizator():
     while True:
