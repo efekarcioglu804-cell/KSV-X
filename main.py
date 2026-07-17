@@ -22,6 +22,20 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
+# --- KSVİX HFT (YÜKSEK FREKANSLI) CANLI YAYIN HAFIZASI ---
+CANLI_FIYATLAR = {}
+AKTIF_YAYINLAR = set()
+
+async def canli_yayin_ajani(borsa, sembol):
+    """Bu ajan sadece tek bir coine kilitlenir ve 7/24 websocket akışını RAM'e yazar."""
+    while sembol in AKTIF_YAYINLAR:
+        try:
+            ticker = await borsa.watch_ticker(sembol)
+            CANLI_FIYATLAR[sembol] = float(ticker.get('last') or 0)
+        except Exception:
+            await asyncio.sleep(0.5)
+# --------------------------------------------------------
+
 def hayalet_enjektor(borsa, sembol, coin_adi):
     if borsa.markets is not None and sembol not in borsa.markets:
         base = coin_adi.replace('USDT', '')
@@ -282,42 +296,47 @@ async def fiyat_takip_radari():
                     conn.close()
             
             if not bekleyenler:
+                AKTIF_YAYINLAR.clear()
+                CANLI_FIYATLAR.clear()
                 await asyncio.sleep(0.5)
                 continue
 
-            sembol_map, semboller = {}, []
+            sembol_map = {}
+            gerekli_semboller = set()
             for sinyal in bekleyenler:
                 sembol = sinyal[1].replace('USDT', '') + '/USDT:USDT'
                 hayalet_enjektor(borsa_ws, sembol, sinyal[1])
-                semboller.append(sembol)
                 sembol_map[sembol] = sinyal
+                gerekli_semboller.add(sembol)
             
-            # --- KSVİX VIP WEBSOCKET (CANLI YAYIN) BYPASS MOTORU ---
-            async def tekli_canli_yayin(s):
-                try: return s, await borsa_ws.watch_ticker(s)
-                except: return s, None
-
-            ws_gorevler = [tekli_canli_yayin(s) for s in semboller]
-            ws_sonuclar = await asyncio.wait_for(asyncio.gather(*ws_gorevler), timeout=2.0)
+            # İşi biten coinlerin canlı yayın ajanlarını kapat
+            for s in list(AKTIF_YAYINLAR):
+                if s not in gerekli_semboller:
+                    AKTIF_YAYINLAR.remove(s)
+                    CANLI_FIYATLAR.pop(s, None)
+                    
+            # Yeni sinyaller için RAM tabanlı ajanları başlat
+            for s in gerekli_semboller:
+                if s not in AKTIF_YAYINLAR:
+                    AKTIF_YAYINLAR.add(s)
+                    client.loop.create_task(canli_yayin_ajani(borsa_ws, s))
             
-            tickers = {s: t for s, t in ws_sonuclar if t}
-            # --------------------------------------------------------
+            # 🔥 İŞTE HFT MUCİZESİ: Radar interneti beklemez, RAM'den okur!
+            # Döngü hızı: Saniyede 10 kez (0.1 Saniye)
+            await asyncio.sleep(0.1)
             
             aktif_uyeler = db.get_all_active_users()
-            
             db_guncellemeler = []
             istatistik_guncellemeler = []
             vip_mesajlar = []
             dm_mesajlar = []
             mexc_gorevleri = [] 
             
-            for sembol, ticker in tickers.items():
-                if sembol not in sembol_map: continue
+            for sembol, sinyal in sembol_map.items():
+                # Ajanın anlık olarak RAM'e yazdığı fiyatı çeker
+                fiyat_last = CANLI_FIYATLAR.get(sembol, 0.0)
+                if fiyat_last == 0.0: continue
                 
-                fiyat_last = float(ticker.get('last') or 0)
-                if not fiyat_last: continue
-                
-                sinyal = sembol_map[sembol]
                 s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar, kaldirac, atr, en_iyi_fiyat = sinyal
                 katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
                 yeni_durum, yeni_asama, bildirim = None, None, None
