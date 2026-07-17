@@ -153,12 +153,26 @@ async def genel_handler(event):
             conn = sqlite3.connect(db.DB_NAME, timeout=30)
             try:
                 cursor = conn.cursor()
+                # Havuzdaki tüm sinyaller
                 cursor.execute("SELECT COUNT(*) FROM active_signals")
                 toplam_sinyal = cursor.fetchone()[0]
-            except: toplam_sinyal = 0
+                
+                # Yapay Zekanın "Tecrübe" ettiği (Öğrenimi tamamlanmış) sinyaller
+                cursor.execute("SELECT COUNT(*) FROM active_signals WHERE (asama >= 2 OR durum = 'STOP_OLDU') AND mum_gecmisi != '[]'")
+                egitim_verisi = cursor.fetchone()[0]
+            except: 
+                toplam_sinyal, egitim_verisi = 0, 0
             finally: conn.close()
             
-            sayac_msg = f"🧠 **KSVİX LSTM Yapay Zeka (AI) Havuzu:**\n\n🗃️ Toplanan Eğitim Videosu: `{toplam_sinyal}` İşlem\n✅ Derin Öğrenme Ağları Aktif!"
+            sayac_msg = (
+                f"🧠 **KSVİX LSTM Yapay Zeka Anatomisi:**\n\n"
+                f"🗃️ Radara Giren Toplam İşlem: `{toplam_sinyal}`\n"
+                f"📚 Özümsenen Tecrübe (Eğitim Verisi): `{egitim_verisi}` İşlem\n\n"
+                f"🧬 **Sinir Ağı (Nöron) Yapısı:**\n"
+                f"🔄 Antrenman (Epoch) Derinliği: `10 Tur`\n"
+                f"⚡ Nöron Dalları: `64 Ana + 32 Alt LSTM Ağ`\n\n"
+                f"✅ Derin Öğrenme Motoru Tam Gaz Aktif!"
+            )
             await client.send_message(gonderen_id, sayac_msg)
             
     else:
