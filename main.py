@@ -435,7 +435,7 @@ async def fiyat_takip_radari():
                                 
                                 mexc_gorevleri.append(acil_kapat(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon))
                                 
-                                roe = (abs(kullanici_stop - giris) / giris) * kaldirac * 100
+                                roe = (abs(fiyat_last - giris) / giris) * kaldirac * 100
                                 if stop_tipi == "ORIJINAL": 
                                     istatistik_guncellemeler.append((uye['telegram_id'], 'stop', 1, -(uye['trade_amount']*(roe/100))))
                                     dm_msg = f"🚨 **#{coin} Stop Loss.**\n🩸 `-{roe:.2f}%` ({kaldirac}x ROE) 🛡️"
@@ -456,7 +456,7 @@ async def fiyat_takip_radari():
 
                     if (yon == 'LONG' and fiyat_last <= sl) or (yon == 'SHORT' and fiyat_last >= sl):
                         yeni_durum = 'STOP_OLDU'
-                        roe = (abs(sl - giris) / giris) * kaldirac * 100
+                        roe = (abs(fiyat_last - giris) / giris) * kaldirac * 100
                         bildirim = f"🛡 **STOP PATLADI** | #{coin}\n🩸 **Zarar:** `-{roe:.2f}%` ({kaldirac}x ROE) ⚔️"
                     else:
                         if asama < 2 and ((yon == 'LONG' and fiyat_last >= tp1) or (yon == 'SHORT' and fiyat_last <= tp1)):
