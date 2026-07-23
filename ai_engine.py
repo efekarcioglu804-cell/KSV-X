@@ -3,7 +3,7 @@ import json
 import sqlite3
 import numpy as np
 import pandas as pd
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # Gereksiz logları kapat
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Input, concatenate
 import database as db
@@ -19,56 +19,82 @@ def yapay_zeka_egit(df):
         try:
             video_data = json.loads(row['mum_gecmisi'])
             if len(video_data) == 20: 
-                X_lstm_list.append(video_data)
+                arr = np.array(video_data, dtype=float)
                 
-                # Yeni Sol Lob: İndikatörleri ve Psikolojiyi al
+                # --- BEYİN YANMASINI ENGELLEYEN NORMALİZASYON (FİLTRE) ---
+                max_price = np.max(arr[:, 3]) if np.max(arr[:, 3]) > 0 else 1.0
+                arr[:, 0:4] = arr[:, 0:4] / max_price
+                
+                max_vol = np.max(arr[:, 4]) if np.max(arr[:, 4]) > 0 else 1.0
+                arr[:, 4] = arr[:, 4] / max_vol
+                # ---------------------------------------------------------
+                
+                X_lstm_list.append(arr)
+                
+                r = float(row['rsi_degeri']) if pd.notnull(row['rsi_degeri']) else 50.0
+                m = float(row['macd_degeri']) if pd.notnull(row['macd_degeri']) else 0.0
+                h = float(row['hacim_degeri']) if pd.notnull(row['hacim_degeri']) else 0.0
+                f = float(row['fear_greed']) if pd.notnull(row['fear_greed']) else 50.0
+                
+                # 👑 YENİ: Yönü makinenin anlayacağı dile (1 ve 0) çevirdik
+                y_num = 1.0 if row['yon'] == 'LONG' else 0.0
+                
                 feat = [
-                    float(row['rsi_degeri'] if pd.notnull(row['rsi_degeri']) else 50.0),
-                    float(row['macd_degeri'] if pd.notnull(row['macd_degeri']) else 0.0),
-                    float(row['hacim_degeri'] if pd.notnull(row['hacim_degeri']) else 0.0),
-                    float(row['fear_greed'] if pd.notnull(row['fear_greed']) else 50.0)
+                    y_num,                  # İşlem Yönü
+                    r / 100.0,              # RSI
+                    np.tanh(m),             # MACD
+                    np.log1p(h) / 20.0,     # Hacim
+                    f / 100.0               # FNG
                 ]
                 X_feat_list.append(feat)
                 y_list.append(row['sonuc'])
         except:
             continue
             
-    if len(X_lstm_list) < 30: return None # Eğitim için minimum veri
+    if len(X_lstm_list) < 30: return None
     
-    X_lstm = np.array(X_lstm_list) # Şekil: (Örnek, 20, 5)
-    X_feat = np.array(X_feat_list) # Şekil: (Örnek, 4)
+    X_lstm = np.array(X_lstm_list)
+    X_feat = np.array(X_feat_list)
     y = np.array(y_list)
     
-    # 🧠 1. SAĞ LOB: ZAMAN SERİSİ (MUM VİDEOSU - GÖRSEL HAFIZA)
+    # 👑 KRALIN V12 DERİN ÖĞRENME MOTORU MİMARİSİ 👑
     input_lstm = Input(shape=(20, 5), name="mum_girisi")
-    x1 = LSTM(64, return_sequences=True)(input_lstm)
-    x1 = Dropout(0.2)(x1)
-    x1 = LSTM(32)(x1)
-    x1 = Dropout(0.2)(x1)
     
-    # 🧠 2. SOL LOB: PSİKOLOJİ VE HACİM (ANLIK İNDİKATÖRLER)
-    input_feat = Input(shape=(4,), name="indikator_girisi")
-    x2 = Dense(16, activation='relu')(input_feat)
+    # Dal 1: 128 Nöronluk Devasa Görsel Hafıza
+    x1 = LSTM(128, return_sequences=True)(input_lstm)
+    x1 = Dropout(0.3)(x1) # Ezberlemeyi unutma payıyla engelliyoruz
     
-    # ⚡ CORTEX: İKİ LOBU BİRLEŞTİR (Multi-Input Fusion)
+    # Dal 2: 64 Nöronluk Alt Süzgeç
+    x1 = LSTM(64)(x1)
+    x1 = Dropout(0.3)(x1)
+    
+    # İndikatör Girişi: 4'ten 5 parametreye çıktı (Yön eklendiği için)
+    input_feat = Input(shape=(5,), name="indikator_girisi")
+    x2 = Dense(32, activation='relu')(input_feat)
+    
     birlesim = concatenate([x1, x2])
     
-    # 🎯 KARAR MEKANİZMASI
-    z = Dense(16, activation='relu')(birlesim)
+    # Karar Merkezi: Çift katmanlı (64 -> 32)
+    z = Dense(64, activation='relu')(birlesim)
+    z = Dropout(0.2)(z)
+    z = Dense(32, activation='relu')(z)
+    
     out = Dense(1, activation='sigmoid', name="karar_ciktisi")(z)
     
     model = Model(inputs=[input_lstm, input_feat], outputs=out)
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     
-    # Çift loblu modeli devasa veritabanınla eğit
-    model.fit([X_lstm, X_feat], y, epochs=10, batch_size=8, verbose=0)
+    # 👑 Antrenman (Epoch) 10'dan 25'e çıkartıldı!
+    model.fit([X_lstm, X_feat], y, epochs=25, batch_size=8, verbose=0)
     model.save(MODEL_PATH)
     return model
 
-def sinyali_analiz_et(rsi, macd, hacim, fear_greed, mum_video_json):
+# 👑 YENİ: Sinyali analiz ederken YÖN (yon) verisini de alıyor
+def sinyali_analiz_et(yon, rsi, macd, hacim, fear_greed, mum_video_json):
     conn = sqlite3.connect(db.DB_NAME, timeout=30)
+    # Sorguya 'yon' eklendi
     query = """
-        SELECT mum_gecmisi, rsi_degeri, macd_degeri, hacim_degeri, fear_greed, 
+        SELECT yon, mum_gecmisi, rsi_degeri, macd_degeri, hacim_degeri, fear_greed, 
         CASE WHEN asama >= 2 THEN 1 ELSE 0 END as sonuc
         FROM active_signals 
         WHERE (asama >= 2 OR durum = 'STOP_OLDU') AND mum_gecmisi != '[]'
@@ -77,37 +103,60 @@ def sinyali_analiz_et(rsi, macd, hacim, fear_greed, mum_video_json):
     conn.close()
 
     if len(df) < 50:
-        return len(df), 100.0 # Yeterli tecrübe yoksa onay ver
+        return len(df), 50.0
         
-    # Model var mı kontrol et, varsa çift loblu mu diye test et
     model = None
     if os.path.exists(MODEL_PATH) and len(df) % 10 != 0:
         try:
             model = load_model(MODEL_PATH)
-            # Eğer model eski tek loblu modelse kasıtlı olarak hata verdirtip yenisini eğittiriyoruz
-            if len(model.inputs) != 2: raise ValueError("Eski tek loblu model tespit edildi!")
+            # Modelin girişi 4'ten 5'e çıktığı için eski modeli zorla reddet
+            if model.input_shape[1][1] != 5: raise ValueError("Eski model")
         except:
             model = yapay_zeka_egit(df)
     else:
-        # Her 10 yeni veride bir beyni yeniden çalıştırıp eğit
         model = yapay_zeka_egit(df)
         
-    if model is None: return len(df), 100.0
+    if model is None: return len(df), 50.0
     
-    # Anlık Sinyali Çift Gözle Analiz Et
     try:
-        anlik_video = np.array(json.loads(mum_video_json))
-        anlik_video = anlik_video.reshape(1, 20, 5) # (1 örnek, 20 mum, 5 özellik)
+        arr = np.array(json.loads(mum_video_json), dtype=float)
         
-        anlik_feat = np.array([[float(rsi), float(macd), float(hacim), float(fear_greed)]])
+        if arr.size == 0 or arr.shape[0] != 20:
+            return len(df), 50.0 
         
-        # Geleceği tahmin et (Çift Lob Ateşlemesi)
+        # --- CANLI SİNYAL NORMALİZASYONU ---
+        max_price = np.max(arr[:, 3]) if np.max(arr[:, 3]) > 0 else 1.0
+        arr[:, 0:4] = arr[:, 0:4] / max_price
+        
+        max_vol = np.max(arr[:, 4]) if np.max(arr[:, 4]) > 0 else 1.0
+        arr[:, 4] = arr[:, 4] / max_vol
+        # ------------------------------------
+
+        anlik_video = arr.reshape(1, 20, 5)
+        
+        # 👑 Canlı Sinyalin Yönünü 1 veya 0 olarak al
+        y_num = 1.0 if yon == 'LONG' else 0.0
+        
+        r = float(rsi)
+        m = float(macd)
+        h = float(hacim)
+        f = float(fear_greed)
+        
+        # 👑 Canlı analiz için 'y_num' (YÖN) eklendi
+        anlik_feat = np.array([[
+            y_num,
+            r / 100.0, 
+            np.tanh(m), 
+            np.log1p(h) / 20.0, 
+            f / 100.0
+        ]])
+        
         tahmin = model.predict([anlik_video, anlik_feat], verbose=0)
         basari_ihtimali = round(float(tahmin[0][0]) * 100, 2)
         
-        # Korku endeksi %20'nin altındaysa ve piyasa kan ağlıyorsa AI güvenini törpüle
         if fear_greed <= 20: basari_ihtimali *= 0.8 
         
         return len(df), basari_ihtimali
     except Exception as e:
-        return len(df), 100.0
+        print(f"🛑 AI Tahmin Hatası: {e}")
+        return len(df), 50.0
