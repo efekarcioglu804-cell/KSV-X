@@ -22,12 +22,67 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
+# ======== YENİ: SANAL SİMÜLASYON MATEMATİĞİ ========
+def islem_simule_et(bakiye, mod, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum):
+    if giris <= 0 or bakiye <= 0: return bakiye
+    
+    # ======== ESKİ İŞLEMLER İÇİN SIFIR FİYAT DÜZELTMESİ ========
+    if en_iyi_fiyat == 0.0:
+        en_iyi_fiyat = giris
+    # ==========================================================
+        
+    margin = bakiye * 0.005 # %0.5 Kasa Riski
+    net_kar = 0.0
+    kalan_oran = 1.0 # Başlangıçta malın tamamı (%100) elimizde
+    tp_oranlari = [0.70, 0.10, 0.10, 0.10] # 70-10-10-10 Kuralı
+    tp_fiyatlari = [tp1, tp2, tp3, tp4]
+
+    vurulan_tp_sayisi = asama - 1
+    if vurulan_tp_sayisi > 4: vurulan_tp_sayisi = 4
+    if vurulan_tp_sayisi < 0: vurulan_tp_sayisi = 0
+
+    # Kısmi satış kârlarını hesapla (İLK GİRDİĞİMİZ MARJİN ÜZERİNDEN)
+    for i in range(vurulan_tp_sayisi):
+        hedef = tp_fiyatlari[i]
+        satis_orani = tp_oranlari[i]
+        roe = (abs(hedef - giris) / giris) * kaldirac * 100
+        net_kar += (margin * satis_orani) * (roe / 100)
+        kalan_oran -= satis_orani
+
+    if kalan_oran <= 0.01: return bakiye + net_kar # FULL TP
+
+    # Kalan kısmın nerede kapandığını hesapla
+    kapanis_fiyati = sl
+    if mod == 'BREAKEVEN':
+        kapanis_fiyati = giris if vurulan_tp_sayisi >= 1 else sl
+    elif mod == 'MOVING':
+        if vurulan_tp_sayisi == 1: kapanis_fiyati = giris
+        elif vurulan_tp_sayisi == 2: kapanis_fiyati = tp1
+        elif vurulan_tp_sayisi == 3: kapanis_fiyati = tp2
+        elif vurulan_tp_sayisi == 4: kapanis_fiyati = tp3
+        else: kapanis_fiyati = sl
+    elif mod == 'TRAILING':
+        mesafe = (atr * 1.5) if atr > 0 else (giris * 0.02)
+        if yon == 'LONG':
+            dinamik_s = en_iyi_fiyat - mesafe
+            kapanis_fiyati = dinamik_s if dinamik_s > sl else sl
+        else:
+            dinamik_s = en_iyi_fiyat + mesafe
+            kapanis_fiyati = dinamik_s if (dinamik_s < sl or sl == 0) else sl
+
+    # Kapanan kısımdan gelen net PNL
+    fark_yuzde = (kapanis_fiyati - giris) / giris if yon == 'LONG' else (giris - kapanis_fiyati) / giris
+    son_roe = fark_yuzde * kaldirac * 100
+    net_kar += (margin * kalan_oran) * (son_roe / 100)
+    
+    return bakiye + net_kar
+# ====================================================
+
 # --- KSVİX HFT (YÜKSEK FREKANSLI) CANLI YAYIN HAFIZASI ---
 CANLI_FIYATLAR = {}
 AKTIF_YAYINLAR = set()
 
 async def canli_yayin_ajani(borsa, sembol):
-    """Bu ajan sadece tek bir coine kilitlenir ve 7/24 websocket akışını RAM'e yazar."""
     while sembol in AKTIF_YAYINLAR:
         try:
             ticker = await borsa.watch_ticker(sembol)
@@ -73,7 +128,14 @@ def get_fear_and_greed():
 async def piyasa_fotografi_cek(borsa, sembol):
     try:
         mumlar = await borsa.fetch_ohlcv(sembol, '15m', limit=50)
-        if not mumlar or len(mumlar) < 30: return 0.0, 0.0, 0.0, 0.0, '[]'
+        
+        # 👑 KRALIN TESPİTİ: SESSİZ YUTKUNMAYI ENGELLE
+        if not mumlar:
+            print(f"⚠️ VERİ YOK ({sembol}): Borsa boş veri yolladı! (İsim yanlış veya sadece Spot'ta var)")
+            return 0.0, 0.0, 0.0, 0.0, '[]'
+        if len(mumlar) < 30:
+            print(f"⚠️ EKSİK MUM ({sembol}): Sadece {len(mumlar)} mum geldi. (20 mumluk AI için yetersiz)")
+            return 0.0, 0.0, 0.0, 0.0, '[]'
         
         kapanislar = [mum[4] for mum in mumlar]
         hacim = mumlar[-1][5] 
@@ -102,7 +164,12 @@ async def piyasa_fotografi_cek(borsa, sembol):
             video_verisi.append([m[1], m[2], m[3], m[4], m[5]])
             
         return round(rsi, 2), round(macd, 4), round(hacim, 2), atr, json.dumps(video_verisi)
-    except: return 0.0, 0.0, 0.0, 0.0, '[]'
+    
+    # ======== KRİTİK DEĞİŞİKLİK: SESSİZ HATAYI BOZUYORUZ ========
+    except Exception as e: 
+        print(f"⚠️ MUM ÇEKİLEMEDİ ({sembol}): {e}")
+        return 0.0, 0.0, 0.0, 0.0, '[]'
+    # ============================================================
 
 @client.on(events.NewMessage(incoming=True))
 async def genel_handler(event):
@@ -153,11 +220,8 @@ async def genel_handler(event):
             conn = sqlite3.connect(db.DB_NAME, timeout=30)
             try:
                 cursor = conn.cursor()
-                # Havuzdaki tüm sinyaller
                 cursor.execute("SELECT COUNT(*) FROM active_signals")
                 toplam_sinyal = cursor.fetchone()[0]
-                
-                # Yapay Zekanın "Tecrübe" ettiği (Öğrenimi tamamlanmış) sinyaller
                 cursor.execute("SELECT COUNT(*) FROM active_signals WHERE (asama >= 2 OR durum = 'STOP_OLDU') AND mum_gecmisi != '[]'")
                 egitim_verisi = cursor.fetchone()[0]
             except: 
@@ -225,7 +289,7 @@ async def genel_handler(event):
             except Exception as e:
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
-            if islem_sayisi >= 50 and ai_ihtimal < 40.0:
+            if islem_sayisi >= 50 and ai_ihtimal < 55.0:
                 red_mesaj = f"🤖 **KSVİX LSTM AI YARGICI DEVREDE!**\n\n⚠️ **#{coin}** sinyali izlendi.\n📈 **Korku/Açgözlülük:** `{fng}`\n📉 **Başarı İhtimali:** `%{ai_ihtimal}`\n🛑 **Karar:** Bu bir tuzak formasyonu. Sinyal reddedildi!"
                 try: await client.send_message(VIP_KANAL_ID, red_mesaj)
                 except Exception as e: print(f"🛑 AI Mesaj Hatası: {e}")
@@ -323,20 +387,16 @@ async def fiyat_takip_radari():
                 sembol_map[sembol] = sinyal
                 gerekli_semboller.add(sembol)
             
-            # İşi biten coinlerin canlı yayın ajanlarını kapat
             for s in list(AKTIF_YAYINLAR):
                 if s not in gerekli_semboller:
                     AKTIF_YAYINLAR.remove(s)
                     CANLI_FIYATLAR.pop(s, None)
                     
-            # Yeni sinyaller için RAM tabanlı ajanları başlat
             for s in gerekli_semboller:
                 if s not in AKTIF_YAYINLAR:
                     AKTIF_YAYINLAR.add(s)
                     client.loop.create_task(canli_yayin_ajani(borsa_ws, s))
             
-            # 🔥 İŞTE HFT MUCİZESİ: Radar interneti beklemez, RAM'den okur!
-            # Döngü hızı: Saniyede 10 kez (0.1 Saniye)
             await asyncio.sleep(0.1)
             
             aktif_uyeler = db.get_all_active_users()
@@ -347,7 +407,6 @@ async def fiyat_takip_radari():
             mexc_gorevleri = [] 
             
             for sembol, sinyal in sembol_map.items():
-                # Ajanın anlık olarak RAM'e yazdığı fiyatı çeker
                 fiyat_last = CANLI_FIYATLAR.get(sembol, 0.0)
                 if fiyat_last == 0.0: continue
                 
@@ -454,10 +513,17 @@ async def fiyat_takip_radari():
                                     dm_msg = f"🛡️ **#{coin} Hareketli Stop!**\n📈 `+{roe:.2f}%` kârla kapandı. 🔥"
                                 dm_mesajlar.append((uye['telegram_id'], dm_msg))
 
+                    # ======== YENİ: VIP KANAL İÇİN DÜZELTİLMİŞ STOP BİLDİRİMİ ========
                     if (yon == 'LONG' and fiyat_last <= sl) or (yon == 'SHORT' and fiyat_last >= sl):
                         yeni_durum = 'STOP_OLDU'
                         roe = (abs(fiyat_last - giris) / giris) * kaldirac * 100
-                        bildirim = f"🛡 **STOP PATLADI** | #{coin}\n🩸 **Zarar:** `-{roe:.2f}%` ({kaldirac}x ROE) ⚔️"
+                        if asama < 2:
+                            # Sadece hiç kâr alınmamışsa (aşama 1) VIP kanala Stop mesajı at
+                            bildirim = f"🛡 **STOP PATLADI** | #{coin}\n🩸 **Zarar:** `-{roe:.2f}%` ({kaldirac}x ROE) ⚔️"
+                        else:
+                            # Kâr alındıktan sonra stop olduysa VIP kanalı rahatsız etme (Sessiz kapanış)
+                            bildirim = None
+                    # =================================================================
                     else:
                         if asama < 2 and ((yon == 'LONG' and fiyat_last >= tp1) or (yon == 'SHORT' and fiyat_last <= tp1)):
                             yeni_asama = 2
@@ -639,10 +705,67 @@ async def gunluk_pnl_raporlayici():
                     toplam_sinyal = cursor.fetchone()[0]
                     cursor.execute("SELECT COUNT(*) FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
                     aktif_sinyal = cursor.fetchone()[0]
-                except: toplam_sinyal, aktif_sinyal = 0, 0
-                finally: conn.close()
+                    
+                    # ======== YENİ: SANAL SİMÜLASYON LABORATUVARI ========
+                    dosya = "sanal_kasa.json"
+                    kasa = {
+                        "MOVING": {"bakiye": 200.0, "dunku_bakiye": 200.0},
+                        "TRAILING": {"bakiye": 200.0, "dunku_bakiye": 200.0},
+                        "BREAKEVEN": {"bakiye": 200.0, "dunku_bakiye": 200.0},
+                        "islenen_idler": []
+                    }
+                    if os.path.exists(dosya):
+                        try:
+                            with open(dosya, 'r') as f: kasa = json.load(f)
+                        except: pass
+
+                    cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum FROM active_signals WHERE durum IN ('STOP_OLDU', 'FULL_TP')")
+                    kapananlar =fetchall()
+                    
+                    islenen_idler_set = set(kasa["islenen_idler"])
+                    yeni_islenen = 0
+                    
+                    for islem in kapananlar:
+                        s_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum = islem
+                        if s_id in islenen_idler_set: continue
+                        
+                        for mod in ["MOVING", "TRAILING", "BREAKEVEN"]:
+                            kasa[mod]["bakiye"] = islem_simule_et(kasa[mod]["bakiye"], mod, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum)
+                        
+                        kasa["islenen_idler"].append(s_id)
+                        yeni_islenen += 1
+
+                    sim_msg = f"📊 **KSVİX SİMÜLASYON LABORATUVARI** 📊\n"
+                    sim_msg += f"*(Sermaye: $200 | Risk: %0.5 | TP: %70-10-10-10)*\n\n"
+                    sim_msg += f"⏳ **İçerideki Açık İşlem:** `{aktif_sinyal}`\n"
+                    if yeni_islenen > 0: sim_msg += f"🔍 **Bugün Kapanıp Analiz Edilen:** `{yeni_islenen} İşlem`\n\n"
+                    else: sim_msg += "\n"
+                    
+                    for mod in ["BREAKEVEN", "MOVING", "TRAILING"]:
+                        guncel = kasa[mod]["bakiye"]
+                        eski = kasa[mod]["dunku_bakiye"]
+                        fark = guncel - eski
+                        yuzde = (fark / eski) * 100 if eski > 0 else 0
+                        icon = "🟢" if fark > 0 else "🔴" if fark < 0 else "⚪"
+                        isaret = "+" if fark > 0 else ""
+                        
+                        sim_msg += f"🛡️ **{mod} Zırhı:**\n"
+                        sim_msg += f"💵 Yeni Kasa: `${guncel:.2f}`\n"
+                        sim_msg += f"{icon} Bugün: `{isaret}${fark:.2f}` (%{yuzde:.2f})\n\n"
+                        
+                        kasa[mod]["dunku_bakiye"] = guncel
+                        
+                    with open(dosya, 'w') as f: json.dump(kasa, f)
+                    # =======================================================
+                    
+                except Exception as e: 
+                    print(f"Rapor/Simülasyon Hatası: {e}")
+                    sim_msg, toplam_sinyal, aktif_sinyal = "", 0, 0
+                finally: 
+                    conn.close()
 
                 vip_msg = (
+                    f"{sim_msg}"
                     f"🧠 **KSVİX YAPAY ZEKA (AI) İSTİHBARAT MERKEZİ** 🧠\n"
                     f"📅 **Tarih:** {su_an.strftime('%d %B %Y')}\n\n"
                     f"🗃️ **Havuzdaki Toplam Eğitim Videoları:** `{toplam_sinyal} İşlem`\n"
