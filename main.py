@@ -233,8 +233,8 @@ async def genel_handler(event):
                 f"🗃️ Radara Giren Toplam İşlem: `{toplam_sinyal}`\n"
                 f"📚 Özümsenen Tecrübe (Eğitim Verisi): `{egitim_verisi}` İşlem\n\n"
                 f"🧬 **Sinir Ağı (Nöron) Yapısı:**\n"
-                f"🔄 Antrenman (Epoch) Derinliği: `10 Tur`\n"
-                f"⚡ Nöron Dalları: `64 Ana + 32 Alt LSTM Ağ`\n\n"
+                f"🔄 Antrenman (Epoch) Derinliği: `25 Tur`\n"
+                f"⚡ Nöron Dalları: `128 Ana + 64 Alt LSTM Ağ`\n\n"
                 f"✅ Derin Öğrenme Motoru Tam Gaz Aktif!"
             )
             await client.send_message(gonderen_id, sayac_msg)
@@ -285,7 +285,8 @@ async def genel_handler(event):
             islem_sayisi, ai_ihtimal = 0, 100.0
             coin = sinyal['coin']
             try:
-                islem_sayisi, ai_ihtimal = await asyncio.to_thread(ai_engine.sinyali_analiz_et, rsi_degeri, macd_degeri, hacim_degeri, fng, mum_video)
+                # 👑 KRALIN V12 MOTORU: Sinyalin yönü (LONG/SHORT) artık beyne yollanıyor!
+                islem_sayisi, ai_ihtimal = await asyncio.to_thread(ai_engine.sinyali_analiz_et, sinyal['yon'], rsi_degeri, macd_degeri, hacim_degeri, fng, mum_video)
             except Exception as e:
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
@@ -720,7 +721,7 @@ async def gunluk_pnl_raporlayici():
                         except: pass
 
                     cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum FROM active_signals WHERE durum IN ('STOP_OLDU', 'FULL_TP')")
-                    kapananlar =fetchall()
+                    kapananlar = cursor.fetchall()
                     
                     islenen_idler_set = set(kasa["islenen_idler"])
                     yeni_islenen = 0
