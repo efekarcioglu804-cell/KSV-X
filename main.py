@@ -22,6 +22,37 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
+def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
+    tp_fiyatlari = [tp1, tp2, tp3, tp4]
+    try:
+        tp_oranlari = [float(x)/100.0 for x in tp_ratios_str.split(',')]
+    except:
+        tp_oranlari = [0.25, 0.25, 0.25, 0.25]
+        
+    net_kar = 0.0
+    kalan_oran = 1.0
+    
+    vurulan_tp_sayisi = asama_kapanis - 1
+    if vurulan_tp_sayisi > 4: vurulan_tp_sayisi = 4
+    if vurulan_tp_sayisi < 0: vurulan_tp_sayisi = 0
+    
+    # 1. Aşama: Vurulan TP'lerin kısmi kârlarını topla
+    for i in range(vurulan_tp_sayisi):
+        hedef = tp_fiyatlari[i]
+        satis_orani = tp_oranlari[i]
+        fark_yuzde = (hedef - giris) / giris if yon == 'LONG' else (giris - hedef) / giris
+        roe = fark_yuzde * kaldirac * 100
+        net_kar += (trade_amount * satis_orani) * (roe / 100)
+        kalan_oran -= satis_orani
+        
+    # 2. Aşama: İçeride kalan son parçanın kapanış (Stop/BE/Market) fiyatından kâr-zararını hesapla
+    if kalan_oran > 0.01:
+        fark_yuzde = (kapanis_fiyati - giris) / giris if yon == 'LONG' else (giris - kapanis_fiyati) / giris
+        son_roe = fark_yuzde * kaldirac * 100
+        net_kar += (trade_amount * kalan_oran) * (son_roe / 100)
+        
+    return net_kar
+
 def islem_simule_et(bakiye, mod, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum):
     if giris <= 0 or bakiye <= 0: return bakiye
     if en_iyi_fiyat == 0.0: en_iyi_fiyat = giris
@@ -129,7 +160,7 @@ async def piyasa_fotografi_cek(borsa, sembol):
         except: trend_4h = 0.5
         
         if not mumlar or len(mumlar) < 30:
-            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, '[]'
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, '[]'
         
         kapanislar = [mum[4] for mum in mumlar]
         hacim = mumlar[-1][5] 
@@ -151,10 +182,17 @@ async def piyasa_fotografi_cek(borsa, sembol):
         macd = hesapla_ema(kapanislar, 12) - hesapla_ema(kapanislar, 26)
         
         cum_vp, cum_vol = 0.0, 0.0
-        for m in mumlar:
+        onceki_vwap_mesafe = 0.0
+        for i, m in enumerate(mumlar):
             tp = (m[2] + m[3] + m[4]) / 3.0
             cum_vp += tp * m[5]
             cum_vol += m[5]
+            
+            # Önceki 15Dk'lık mumun VWAP mesafesini hesapla
+            if i == len(mumlar) - 2:
+                onceki_vwap = cum_vp / cum_vol if cum_vol > 0 else m[4]
+                onceki_vwap_mesafe = ((m[4] - onceki_vwap) / onceki_vwap) * 100
+                
         vwap = cum_vp / cum_vol if cum_vol > 0 else anlik_fiyat
         vwap_mesafe = ((anlik_fiyat - vwap) / vwap) * 100
         
@@ -169,13 +207,14 @@ async def piyasa_fotografi_cek(borsa, sembol):
         
         video_verisi = [[m[1], m[2], m[3], m[4], m[5]] for m in mumlar[-20:]]
             
-        return (round(rsi, 2), round(macd, 4), round(hacim, 2), atr, round(vwap_mesafe, 4), 
-                round(trend_4h, 1), round(direnc_mesafe, 2), round(destek_mesafe, 2), round(sikisma_orani, 4), 
-                json.dumps(video_verisi))
+        return (round(rsi, 2), round(macd, 4), round(hacim, 2), atr, 
+                round(vwap_mesafe, 4), round(onceki_vwap_mesafe, 4), 
+                round(trend_4h, 1), round(direnc_mesafe, 2), round(destek_mesafe, 2), 
+                round(sikisma_orani, 4), json.dumps(video_verisi))
     
     except Exception as e: 
         print(f"⚠️ MUM ÇEKİLEMEDİ ({sembol}): {e}")
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, '[]'
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, '[]'
 
 @client.on(events.NewMessage(incoming=True))
 async def genel_handler(event):
@@ -259,7 +298,7 @@ async def genel_handler(event):
             if not sinyal: return
 
             borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
-            rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe = 0.0, 0.0, 0.0, 0.0, 0.0
+            rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video = 0.5, 0.0, 0.0, 0.0, '[]'
             fng = get_fear_and_greed()
             
@@ -268,7 +307,7 @@ async def genel_handler(event):
                 await borsa_tmp.load_markets()
                 hayalet_enjektor(borsa_tmp, sembol_tmp, sinyal['coin'])
                 
-                (rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, 
+                (rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe,
                  trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video) = await piyasa_fotografi_cek(borsa_tmp, sembol_tmp)
                 
                 ticker = await borsa_tmp.fetch_ticker(sembol_tmp)
@@ -301,13 +340,22 @@ async def genel_handler(event):
             islem_sayisi, ai_ihtimal = 0, 100.0
             coin = sinyal['coin']
             
-            # 👑 KRALIN KESİN VWAP KURALI VE HACİM LİKİDİTE KALKANI (DM BİLDİRİMLİ)
+            # 👑 KRALIN ÇİFT ONAYLI VWAP KURALI VE HACİM LİKİDİTE KALKANI
+            dinamik_sinir = max(1.2, min(3.5, sikisma_orani * 1.5))
             red_nedeni = None
-            if (sinyal['yon'] == 'LONG' and (vwap_mesafe <= 0.0 or vwap_mesafe > 1.8)):
-                red_nedeni = f"VWAP Uyuşmazlığı (İstenen: 0 ile 1.8 arası | Mevcut: %{vwap_mesafe:.2f})"
-            elif (sinyal['yon'] == 'SHORT' and (vwap_mesafe >= 0.0 or vwap_mesafe < -1.8)):
-                red_nedeni = f"VWAP Uyuşmazlığı (İstenen: -1.8 ile 0 arası | Mevcut: %{vwap_mesafe:.2f})"
-            elif hacim_degeri < 75000:
+            
+            if sinyal['yon'] == 'LONG':
+                if vwap_mesafe <= 0.0 or vwap_mesafe > dinamik_sinir:
+                    red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
+                elif onceki_vwap_mesafe <= 0.0 or onceki_vwap_mesafe > dinamik_sinir:
+                    red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
+            elif sinyal['yon'] == 'SHORT':
+                if vwap_mesafe >= 0.0 or vwap_mesafe < -dinamik_sinir:
+                    red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+                elif onceki_vwap_mesafe >= 0.0 or onceki_vwap_mesafe < -dinamik_sinir:
+                    red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+                    
+            if not red_nedeni and hacim_degeri < 75000:
                 red_nedeni = f"Yetersiz Hacim / Likidite (Minimum: 75.000 | Mevcut: {hacim_degeri:.2f})"
                 
             if red_nedeni:
@@ -326,7 +374,7 @@ async def genel_handler(event):
             except Exception as e:
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
-            # 👑 OTONOM YARGIÇ REDDİ (DM BİLDİRİMLİ)
+            # 👑 OTONOM YARGIÇ REDDİ
             if islem_sayisi >= 50 and ai_ihtimal < 70.0:
                 red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
                 print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
@@ -336,7 +384,7 @@ async def genel_handler(event):
                     except: pass
                 return
 
-            ai_ek_metin = f"\n🤖 **AI LSTM Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`"
+            ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`"
                 
             try:
                 signal_id = db.sinyal_kaydet(
@@ -552,23 +600,27 @@ async def fiyat_takip_radari():
                                 
                                 mexc_gorevleri.append(acil_kapat(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon))
                                 
+                                # 👑 KÂR/ZARAR MUHASEBESİ: Geçmiş TPlere göre net kapanış bilançosu
                                 roe = (abs(fiyat_last - giris) / giris) * kaldirac * 100
+                                kar = gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kullanici_stop, kaldirac, uye['trade_amount'], asama, uye['tp_ratios'])
+                                sembol_para = "USDT" if uye['trade_mode'] == 'FIXED' else "%"
+                                
                                 if stop_tipi == "ORIJINAL": 
-                                    istatistik_guncellemeler.append((uye['telegram_id'], 'stop', 1, -(uye['trade_amount']*(roe/100))))
-                                    dm_msg = f"🚨 **#{coin} Stop Loss.**\n🩸 `-{roe:.2f}%` ({kaldirac}x ROE) 🛡️"
+                                    istatistik_guncellemeler.append((uye['telegram_id'], 'stop', 1, kar))
+                                    dm_msg = f"🚨 **#{coin} Stop Loss.**\n🩸 Kapanış ROE: `-{roe:.2f}%` ({kaldirac}x)\n💸 **Net Bilanço:** `{kar:+.2f} {sembol_para}`"
                                 elif stop_tipi == "BREAK_EVEN":
-                                    istatistik_guncellemeler.append((uye['telegram_id'], 'be', 1, 0.0))
-                                    dm_msg = f"🛡️ **#{coin} Break-Even!**\n⚖️ Sıfır riskle ayrıldık. 💸"
+                                    istatistik_guncellemeler.append((uye['telegram_id'], 'be', 1, kar))
+                                    dm_msg = f"🛡️ **#{coin} Break-Even!**\n⚖️ Kalan pozisyon sıfır riskle kapandı.\n💸 **Net (Önceki TP dahil):** `{kar:+.2f} {sembol_para}`"
                                 elif stop_tipi == "TRAILING":
                                     if (yon == 'LONG' and kullanici_stop > giris) or (yon == 'SHORT' and kullanici_stop < giris):
-                                        istatistik_guncellemeler.append((uye['telegram_id'], 'tp', 1, (uye['trade_amount']*(roe/100))))
-                                        dm_msg = f"🛡️ **#{coin} Trailing (İz Süren) Stop!**\n📈 `+{roe:.2f}%` kâr cüzdana kilitlendi! 🔥"
+                                        istatistik_guncellemeler.append((uye['telegram_id'], 'tp', 1, kar))
+                                        dm_msg = f"🛡️ **#{coin} Trailing (İz Süren) Stop!**\n📈 Son kapanış ROE: `+{roe:.2f}%`\n💸 **Net Bilanço:** `{kar:+.2f} {sembol_para}`"
                                     else:
-                                        istatistik_guncellemeler.append((uye['telegram_id'], 'be', 1, 0.0))
-                                        dm_msg = f"🛡️ **#{coin} Trailing (Breakeven) Kalkanı.**\n⚖️ Sıfır riskle işlemden ayrıldık."
+                                        istatistik_guncellemeler.append((uye['telegram_id'], 'be', 1, kar))
+                                        dm_msg = f"🛡️ **#{coin} Trailing (Breakeven).**\n⚖️ Sıfır riskle ayrıldık.\n💸 **Net (Önceki TP dahil):** `{kar:+.2f} {sembol_para}`"
                                 else:
-                                    istatistik_guncellemeler.append((uye['telegram_id'], 'tp', 1, (uye['trade_amount']*(roe/100))))
-                                    dm_msg = f"🛡️ **#{coin} Hareketli Stop!**\n📈 `+{roe:.2f}%` kârla kapandı. 🔥"
+                                    istatistik_guncellemeler.append((uye['telegram_id'], 'tp', 1, kar))
+                                    dm_msg = f"🛡️ **#{coin} Hareketli Stop!**\n📈 Kapanış ROE: `+{roe:.2f}%`\n💸 **Net Bilanço:** `{kar:+.2f} {sembol_para}`"
                                 dm_mesajlar.append((uye['telegram_id'], dm_msg))
 
                     if (yon == 'LONG' and fiyat_last <= sl) or (yon == 'SHORT' and fiyat_last >= sl):
@@ -599,6 +651,9 @@ async def fiyat_takip_radari():
                             for uye in aktif_uyeler:
                                 if str(uye['telegram_id']) in katilanlar_listesi:
                                     mexc_gorevleri.append(acil_kapat(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon))
+                                    # 👑 FULL TP DURUMUNDA GÜNLÜK MUHASEBEYE İŞLE
+                                    kar = gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, tp4, kaldirac, uye['trade_amount'], 5, uye['tp_ratios'])
+                                    istatistik_guncellemeler.append((uye['telegram_id'], 'tp', 1, kar))
 
                 if yeni_durum or yeni_asama:
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
@@ -618,7 +673,7 @@ async def fiyat_takip_radari():
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 if yeni_asama == 5:
-                                    dm_mesajlar.append((uye['telegram_id'], f"👑 **#{coin} FULL TP Vuruldu!**\n🤑 Maksimum kâr (`+{tp_roe:.2f}%` {kaldirac}x ROE) cebinde! İşlem kapandı. 🥂"))
+                                    dm_mesajlar.append((uye['telegram_id'], f"👑 **#{coin} FULL TP Vuruldu!**\n🤑 Maksimum kâr cebinde! İşlem tamamen kapandı. 🥂"))
                                 else:
                                     dm_mesajlar.append((uye['telegram_id'], f"🎯 **#{coin} TP{vurulan_tp} Vuruldu!**\n💸 Kısmi kâr satıldı (`+{tp_roe:.2f}%` {kaldirac}x ROE).\n🛡️ Stop kalkanı güncellendi! 🦅"))
 
@@ -665,7 +720,6 @@ async def fiyat_takip_radari():
 
 async def golge_senkronizator():
     while True:
-        # 👑 DÜZELTME 3: Hızlı Reaksiyon Süresi
         await asyncio.sleep(5) 
         try:
             aktif_uyeler = db.get_all_active_users()
@@ -677,8 +731,7 @@ async def golge_senkronizator():
                 cursor.execute("SELECT id, coin, yon, giris, katilanlar FROM active_signals WHERE durum = 'BEKLIYOR'")
                 bekleyenler = cursor.fetchall()
                 
-                # 👑 DÜZELTME 4: Eksik parametreler eklendi
-                cursor.execute("SELECT id, coin, giris, sl, kaldirac, asama, katilanlar FROM active_signals WHERE durum = 'ISLEMDE'")
+                cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, asama, katilanlar FROM active_signals WHERE durum = 'ISLEMDE'")
                 islemdekiler = cursor.fetchall()
                 
                 for uye in aktif_uyeler:
@@ -691,6 +744,7 @@ async def golge_senkronizator():
                                 aktif_semboller.add(p['symbol'])
                         
                         uye_tid = str(uye['telegram_id'])
+                        sembol_para = "USDT" if uye['trade_mode'] == 'FIXED' else "%"
                         
                         for b_id, coin, yon, giris, katilanlar in bekleyenler:
                             sembol = coin.replace('USDT', '') + '/USDT:USDT'
@@ -704,8 +758,7 @@ async def golge_senkronizator():
                                     try: await client.send_message(int(uye_tid), msg)
                                     except: pass
                         
-                        # 👑 DÜZELTME 5: Gerçek Kapanma Kontrolü ve Sahte TP İptali
-                        for i_id, coin, giris, sl, kaldirac, asama, katilanlar in islemdekiler:
+                        for i_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, asama, katilanlar in islemdekiler:
                             sembol = coin.replace('USDT', '') + '/USDT:USDT'
                             katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
                             
@@ -718,13 +771,13 @@ async def golge_senkronizator():
                                 conn.commit()
                                 
                                 if asama >= 2 and uye['stop_mode'] != 'NONE':
-                                    db.update_daily_stat(uye['telegram_id'], 'be', 1, 0.0)
-                                    msg = f"🛡️ **GÖLGE AJAN RAPORU** | #{coin}\n⚖️ İşlem borsada (Başabaş/Trailing) noktasında kapandı!\n🧹 Sistemden temizlendi."
+                                    kar = gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, giris, kaldirac, uye['trade_amount'], asama, uye['tp_ratios'])
+                                    db.update_daily_stat(uye['telegram_id'], 'be', 1, kar)
+                                    msg = f"🛡️ **GÖLGE AJAN RAPORU** | #{coin}\n⚖️ İşlem borsada (Başabaş/Trailing) noktasında kapandı!\n💸 **Net Kazanç:** `{kar:+.2f} {sembol_para}`"
                                 else:
-                                    roe = (abs(sl - giris) / giris) * kaldirac * 100
-                                    kayip = -(uye['trade_amount'] * (roe / 100))
-                                    db.update_daily_stat(uye['telegram_id'], 'stop', 1, kayip)
-                                    msg = f"🛡️ **GÖLGE AJAN RAPORU** | #{coin}\n🚨 Borsadaki asıl Stop-Loss iğne ile tetiklendi!\n🩸 **Zarar:** `-{roe:.2f}%` ({kaldirac}x)\n🧹 Hedefe gitmeden önce sistemden temizlendi."
+                                    kar = gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, uye['trade_amount'], asama, uye['tp_ratios'])
+                                    db.update_daily_stat(uye['telegram_id'], 'stop', 1, kar)
+                                    msg = f"🛡️ **GÖLGE AJAN RAPORU** | #{coin}\n🚨 Borsadaki asıl Stop-Loss iğne ile tetiklendi!\n💸 **Net Bilanço:** `{kar:+.2f} {sembol_para}`"
                                     
                                 try: await client.send_message(int(uye_tid), msg)
                                 except: pass
@@ -758,9 +811,9 @@ async def gunluk_pnl_raporlayici():
                         f"👑 **KRALIN SİNYALLERİ - GÜNLÜK BİLANÇO** 👑\n"
                         f"📅 **Tarih:** {su_an.strftime('%d %B %Y')}\n\n"
                         f"🚀 **Açılan Toplam Operasyon:** {acilan}\n"
-                        f"🎯 **Başarılı TP:** {tps}\n"
-                        f"🛡️ **Orijinal Stop (Zarar):** {stops}\n"
-                        f"⚖️ **Break-Even (Zararsız):** {bes}\n\n"
+                        f"🎯 **Tam/Kısmi TP Başarısı:** {tps}\n"
+                        f"🛡️ **Asıl Stop (Zarar):** {stops}\n"
+                        f"⚖️ **Break-Even & İz Süren (Zararsız):** {bes}\n\n"
                         f"💰 **Net Kasa Durumu:** `{kar_metni}`\n"
                     )
                     
@@ -858,7 +911,7 @@ async def main():
     client.loop.create_task(fiyat_takip_radari())
     client.loop.create_task(golge_senkronizator())
     client.loop.create_task(gunluk_pnl_raporlayici())
-    print("🦅 V8 Radarları, KSVİX Otonom Kelly Kriteri ve Tazelik Filtresi Aktif...")
+    print("🦅 V8 Radarları, KSVİX Otonom Kelly Kriteri ve Çift VWAP Onayı Aktif...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
