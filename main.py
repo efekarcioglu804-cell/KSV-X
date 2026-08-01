@@ -210,7 +210,6 @@ async def genel_handler(event):
                 await client.send_message(gonderen_id, f"🛡️ **Stop Kalkanı Aktif:** `{mode.upper()}`")
             except: await client.send_message(gonderen_id, "❌ **Hatalı format! /stop TRAILING şeklinde yazın.**")
         
-        # 👑 KRALIN OTONOM MOD KOMUTU
         elif mesaj.startswith('/ksvix_modu'):
             uye = db.get_user_by_id(gonderen_id)
             if uye:
@@ -302,17 +301,21 @@ async def genel_handler(event):
             islem_sayisi, ai_ihtimal = 0, 100.0
             coin = sinyal['coin']
             
-            # 👑 KRALIN KESİN VWAP KURALI (0 ile 1.8 Arası) - SADECE TERMİNAL LOGU
+            # 👑 KRALIN KESİN VWAP KURALI VE HACİM LİKİDİTE KALKANI (DM BİLDİRİMLİ)
+            red_nedeni = None
             if (sinyal['yon'] == 'LONG' and (vwap_mesafe <= 0.0 or vwap_mesafe > 1.8)):
-                print(f"🛑 REDDEDİLDİ [VWAP]: #{coin} | Yön: LONG | VWAP Mesafe: %{vwap_mesafe} (Sebep: Kural 0 / +1.8 İhlali)")
-                return
+                red_nedeni = f"VWAP Uyuşmazlığı (İstenen: 0 ile 1.8 arası | Mevcut: %{vwap_mesafe:.2f})"
             elif (sinyal['yon'] == 'SHORT' and (vwap_mesafe >= 0.0 or vwap_mesafe < -1.8)):
-                print(f"🛑 REDDEDİLDİ [VWAP]: #{coin} | Yön: SHORT | VWAP Mesafe: %{vwap_mesafe} (Sebep: Kural 0 / -1.8 İhlali)")
-                return
-            
-            # 👑 HACİM (LİKİDİTE) KALKANI - KANAMAYI DURDURAN NEŞTER
-            if hacim_degeri < 75000:
-                print(f"🛑 REDDEDİLDİ [HACİM]: #{coin} | Hacim: {hacim_degeri:.2f} (Sebep: 75 Bin Altı Sığ Tahta/Çöp Coin!)")
+                red_nedeni = f"VWAP Uyuşmazlığı (İstenen: -1.8 ile 0 arası | Mevcut: %{vwap_mesafe:.2f})"
+            elif hacim_degeri < 75000:
+                red_nedeni = f"Yetersiz Hacim / Likidite (Minimum: 75.000 | Mevcut: {hacim_degeri:.2f})"
+                
+            if red_nedeni:
+                print(f"🛑 REDDEDİLDİ: #{coin} | Sebep: {red_nedeni}")
+                aktif_uyeler = db.get_all_active_users()
+                for uye in aktif_uyeler:
+                    try: await client.send_message(uye['telegram_id'], f"🛑 **#{coin} SİNYALİ REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
+                    except: pass
                 return
             
             try:
@@ -323,9 +326,14 @@ async def genel_handler(event):
             except Exception as e:
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
-            # 👑 OTONOM YARGIÇ REDDİ - SADECE TERMİNAL LOGU
+            # 👑 OTONOM YARGIÇ REDDİ (DM BİLDİRİMLİ)
             if islem_sayisi >= 50 and ai_ihtimal < 70.0:
-                print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | AI Başarı İhtimali: %{ai_ihtimal} (Sebep: Başarı Oranı %75'in Altında. Reddedildi!)")
+                red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
+                print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
+                aktif_uyeler = db.get_all_active_users()
+                for uye in aktif_uyeler:
+                    try: await client.send_message(uye['telegram_id'], f"🤖 **#{coin} SİNYALİ AI TARAFINDAN REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
+                    except: pass
                 return
 
             ai_ek_metin = f"\n🤖 **AI LSTM Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`"
@@ -459,7 +467,7 @@ async def fiyat_takip_radari():
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
                     
-                    # 👑 KSVİX YAPISAL TAZELİK FİLTRESİ (Sadece Modu Aktif Edenleri Kapsar)
+                    # 👑 KSVİX YAPISAL TAZELİK FİLTRESİ
                     ksvix_kullanicilar = [str(u['telegram_id']) for u in aktif_uyeler if dict(u).get('ksvix_mode', 0) == 1]
                     
                     if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
@@ -478,7 +486,7 @@ async def fiyat_takip_radari():
                                 
                     elif any(tid in katilanlar_listesi for tid in ksvix_kullanicilar) and ((yon == 'LONG' and fiyat_last <= sl) or (yon == 'SHORT' and fiyat_last >= sl)):
                         yeni_durum = 'IPTAL'
-                        bildirim = f"⚠️ **KSVİX TAZELİK FİLTRESİ DEVREDE!** ⚠️\n#{coin} işlemi giriş bölgesine gelmeden yapısal kırılıma uğradı (Trend Bozuldu). Otonom zeka tuzağa düşmemek için pusu emrini iptal etti!"
+                        bildirim = f"⚠️ **KSVİX TAZELİK FİLTRESİ DEVREDE!** ⚠️\n#{coin} işlemi giriş bölgesine gelmeden yapısal kırılıma uğradı. Otonom zeka tuzağa düşmemek için pusu emrini iptal etti!"
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
                                 mexc_gorevleri.append(bekleyen_emri_iptal_et(uye['mexc_api_key'], uye['mexc_api_secret'], coin))
@@ -524,18 +532,18 @@ async def fiyat_takip_radari():
                                 elif asama == 4: kullanici_stop, stop_tipi = tp2, "MOVING_TP2"
                                 elif asama == 5: kullanici_stop, stop_tipi = tp3, "MOVING_TP3"
                             
-                            # 👑 ATR İZ SÜREN STOP (Revize Edildi: Sadece TP1 sonrası Breakeven Üzerinde Çalışır)
+                            # 👑 ATR İZ SÜREN STOP
                             elif uye['stop_mode'] == 'TRAILING':
                                 mesafe = (atr * 1.5) if atr > 0 else (giris * 0.02)
                                 if asama < 2:
-                                    kullanici_stop, stop_tipi = sl, "ORIJINAL" # TP1 vurulana kadar normal stop
+                                    kullanici_stop, stop_tipi = sl, "ORIJINAL"
                                 else:
                                     if yon == 'LONG':
                                         dinamik_s = yeni_en_iyi - mesafe
-                                        kullanici_stop = dinamik_s if dinamik_s > giris else giris # Asla girişin altına inmez
+                                        kullanici_stop = dinamik_s if dinamik_s > giris else giris
                                     else:
                                         dinamik_s = yeni_en_iyi + mesafe
-                                        kullanici_stop = dinamik_s if (dinamik_s < giris and dinamik_s > 0) else giris # Asla girişin üstüne çıkmaz
+                                        kullanici_stop = dinamik_s if (dinamik_s < giris and dinamik_s > 0) else giris
                                     stop_tipi = "TRAILING"
 
                             if (yon == 'LONG' and fiyat_last <= kullanici_stop) or (yon == 'SHORT' and fiyat_last >= kullanici_stop):
@@ -657,7 +665,8 @@ async def fiyat_takip_radari():
 
 async def golge_senkronizator():
     while True:
-        await asyncio.sleep(20) 
+        # 👑 DÜZELTME 3: Hızlı Reaksiyon Süresi
+        await asyncio.sleep(5) 
         try:
             aktif_uyeler = db.get_all_active_users()
             if not aktif_uyeler: continue
@@ -668,7 +677,8 @@ async def golge_senkronizator():
                 cursor.execute("SELECT id, coin, yon, giris, katilanlar FROM active_signals WHERE durum = 'BEKLIYOR'")
                 bekleyenler = cursor.fetchall()
                 
-                cursor.execute("SELECT id, coin, katilanlar FROM active_signals WHERE durum = 'ISLEMDE'")
+                # 👑 DÜZELTME 4: Eksik parametreler eklendi
+                cursor.execute("SELECT id, coin, giris, sl, kaldirac, asama, katilanlar FROM active_signals WHERE durum = 'ISLEMDE'")
                 islemdekiler = cursor.fetchall()
                 
                 for uye in aktif_uyeler:
@@ -694,14 +704,30 @@ async def golge_senkronizator():
                                     try: await client.send_message(int(uye_tid), msg)
                                     except: pass
                         
-                        for i_id, coin, katilanlar in islemdekiler:
+                        # 👑 DÜZELTME 5: Gerçek Kapanma Kontrolü ve Sahte TP İptali
+                        for i_id, coin, giris, sl, kaldirac, asama, katilanlar in islemdekiler:
                             sembol = coin.replace('USDT', '') + '/USDT:USDT'
                             katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
                             
                             if sembol not in aktif_semboller and uye_tid in katilanlar_listesi:
                                 katilanlar_listesi.remove(uye_tid)
                                 cursor.execute("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (",".join(katilanlar_listesi), i_id))
+                                
+                                if not katilanlar_listesi:
+                                    cursor.execute("UPDATE active_signals SET durum = 'STOP_OLDU' WHERE id = ?", (i_id,))
                                 conn.commit()
+                                
+                                if asama >= 2 and uye['stop_mode'] != 'NONE':
+                                    db.update_daily_stat(uye['telegram_id'], 'be', 1, 0.0)
+                                    msg = f"🛡️ **GÖLGE AJAN RAPORU** | #{coin}\n⚖️ İşlem borsada (Başabaş/Trailing) noktasında kapandı!\n🧹 Sistemden temizlendi."
+                                else:
+                                    roe = (abs(sl - giris) / giris) * kaldirac * 100
+                                    kayip = -(uye['trade_amount'] * (roe / 100))
+                                    db.update_daily_stat(uye['telegram_id'], 'stop', 1, kayip)
+                                    msg = f"🛡️ **GÖLGE AJAN RAPORU** | #{coin}\n🚨 Borsadaki asıl Stop-Loss iğne ile tetiklendi!\n🩸 **Zarar:** `-{roe:.2f}%` ({kaldirac}x)\n🧹 Hedefe gitmeden önce sistemden temizlendi."
+                                    
+                                try: await client.send_message(int(uye_tid), msg)
+                                except: pass
                                 
                     except: pass
                     finally: 
