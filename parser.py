@@ -8,7 +8,8 @@ def parse_signal(message_text):
     sonuc = {
         "coin": None, "yon": None, "giris": None, 
         "tp1": 0, "tp2": 0, "tp3": 0, "tp4": 0, "sl": None, 
-        "kaldirac": 20, "margin_tipi": "CROSS"
+        "kaldirac": 20, "margin_tipi": "CROSS",
+        "is_market": False  # 👑 YENİ: Market Giriş Şalteri
     }
     
     # YÖN VE COİN
@@ -23,6 +24,10 @@ def parse_signal(message_text):
     giris_match = re.search(r'ENTRY[:\s]+([0-9.,]+)', metin)
     if giris_match: 
         sonuc["giris"] = float(giris_match.group(1).replace(',', '.'))
+
+    # 👑 YENİ: Sinyalde "MARKET" kelimesi geçiyorsa şalteri kaldır!
+    if "MARKET" in metin:
+        sonuc["is_market"] = True
             
     # TP
     for i in range(1, 5):
