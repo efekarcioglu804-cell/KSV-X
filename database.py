@@ -22,7 +22,8 @@ def init_db():
             trade_amount REAL DEFAULT 5,
             max_trades INTEGER DEFAULT 8,
             tp_ratios TEXT DEFAULT '25,25,25,25',
-            stop_mode TEXT DEFAULT 'NONE'
+            stop_mode TEXT DEFAULT 'NONE',
+            ksvix_mode INTEGER DEFAULT 0
         )
     ''')
     cursor.execute('''
@@ -46,6 +47,11 @@ def init_db():
             hacim_degeri REAL DEFAULT 0.0,
             atr REAL DEFAULT 0.0,
             fear_greed INTEGER DEFAULT 50,
+            vwap_mesafe REAL DEFAULT 0.0,
+            trend_4h REAL DEFAULT 0.5,
+            direnc_mesafe REAL DEFAULT 0.0,
+            destek_mesafe REAL DEFAULT 0.0,
+            sikisma_orani REAL DEFAULT 0.0,
             en_iyi_fiyat REAL DEFAULT 0.0,
             mum_gecmisi TEXT DEFAULT '[]'
         )
@@ -63,7 +69,10 @@ def init_db():
         )
     ''')
     
-    # Yeni odaları eski tabloya enjekte et
+    # Eski tablolara yeni kolonları sarsıntısız enjekte et
+    try: cursor.execute("ALTER TABLE users ADD COLUMN ksvix_mode INTEGER DEFAULT 0")
+    except: pass
+    
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
     except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN katilanlar TEXT DEFAULT ''")
@@ -82,6 +91,16 @@ def init_db():
     except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN fear_greed INTEGER DEFAULT 50")
     except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN vwap_mesafe REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN trend_4h REAL DEFAULT 0.5")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN direnc_mesafe REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN destek_mesafe REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE active_signals ADD COLUMN sikisma_orani REAL DEFAULT 0.0")
+    except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN en_iyi_fiyat REAL DEFAULT 0.0")
     except: pass
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN mum_gecmisi TEXT DEFAULT '[]'")
@@ -94,8 +113,8 @@ def add_user(telegram_id, api_key, api_secret):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades, tp_ratios, stop_mode)
-        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8, '25,25,25,25', 'NONE')
+        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades, tp_ratios, stop_mode, ksvix_mode)
+        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8, '25,25,25,25', 'NONE', 0)
         ON CONFLICT(telegram_id) DO UPDATE SET
             mexc_api_key=excluded.mexc_api_key,
             mexc_api_secret=excluded.mexc_api_secret,
@@ -126,12 +145,28 @@ def update_stop_mode(telegram_id, mode):
     conn.commit()
     conn.close()
 
+def toggle_ksvix_mode(telegram_id, durum):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET ksvix_mode = ? WHERE telegram_id = ?", (durum, telegram_id))
+    conn.commit()
+    conn.close()
+
 def toggle_user_active(telegram_id, durum):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE users SET is_active = ? WHERE telegram_id = ?', (durum, telegram_id))
     conn.commit()
     conn.close()
+
+def get_user_by_id(telegram_id):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return user
 
 def get_all_active_users():
     conn = get_connection()
@@ -142,16 +177,15 @@ def get_all_active_users():
     conn.close()
     return users
 
-def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi=0.0, macd=0.0, hacim=0.0, atr=0.0, fng=50, mum_video='[]'):
+def sinyal_kaydet(coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac=20, rsi=0.0, macd=0.0, hacim=0.0, atr=0.0, fng=50, vwap_mesafe=0.0, trend_4h=0.5, direnc_mesafe=0.0, destek_mesafe=0.0, sikisma_orani=0.0, mum_video='[]'):
     conn = get_connection()
     cursor = conn.cursor()
     su_an = time.time()
-    # İlk kayıt anında en iyi fiyat, giriş fiyatıdır
     cursor.execute('''
         INSERT INTO active_signals 
-        (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi_degeri, macd_degeri, hacim_degeri, atr, fear_greed, en_iyi_fiyat, mum_gecmisi) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi, macd, hacim, atr, fng, giris, mum_video))
+        (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, durum, eklenme_zamani, rsi_degeri, macd_degeri, hacim_degeri, atr, fear_greed, vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, en_iyi_fiyat, mum_gecmisi) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLIYOR', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, su_an, rsi, macd, hacim, atr, fng, vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, giris, mum_video))
     signal_id = cursor.lastrowid
     conn.commit()
     conn.close()
