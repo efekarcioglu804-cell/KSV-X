@@ -64,7 +64,8 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         except: pass
 
         bakiye = await borsa.fetch_balance({'type': 'swap'})
-        wallet_balance = float(bakiye.get('free', {}).get('USDT', bakiye['total'].get('USDT', 0)))
+        # 👑 DÜZELTME 1: Toplam cüzdan bakiyesini baz alıyoruz
+        wallet_balance = float(bakiye.get('total', {}).get('USDT', 0))
         if wallet_balance < 2: return {"durum": "HATA", "hata_mesaji": "Bakiye Çok Düşük"}
 
         kullanilacak_usdt = ayarlar['trade_amount'] if ayarlar['trade_mode'] == 'FIXED' else wallet_balance * (ayarlar['trade_amount'] / 100.0)
@@ -80,14 +81,12 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         fiyat_hassas = float(borsa.price_to_precision(sembol, sinyal['giris']))
         sl_hassas = float(borsa.price_to_precision(sembol, sinyal['sl']))
 
-        params = {'stopLossPrice': sl_hassas, 'reduceOnly': False}
+        # 👑 DÜZELTME 2: Stop için triggerPriceType 3 (Last Price) kullanıyoruz
+        params = {'stopLossPrice': sl_hassas, 'reduceOnly': False, 'triggerPriceType': 3}
         
-        # 👑 YENİ: MARKET Mİ LİMİT Mİ? TETİĞİ ONA GÖRE ÇEK!
         if sinyal.get('is_market', False):
-            # Market Giriş: Fiyat sormadan anlık fiyattan tahtayı süpür
             emir = await borsa.create_order(symbol=sembol, type='market', side=yon, amount=float(miktar), params=params)
         else:
-            # Klasik Limit Giriş: Fiyatın gelmesini bekle
             emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=fiyat_hassas, params=params)
         
         return {"durum": "BASARILI", "emir_id": emir['id'], "eski_silindi": eski_pusu_var}
@@ -199,12 +198,13 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
                 yeni_sl_hassas = float(borsa.price_to_precision(sembol, yeni_sl))
                 try:
                     await borsa.cancel_all_orders(sembol)
+                    # 👑 DÜZELTME 2 (Hareketli stoplar için): triggerPriceType 3
                     await borsa.create_order(
                         symbol=sembol, 
                         type='market', 
                         side=ters_yon, 
                         amount=int(kalan_gercek_miktar), 
-                        params={'triggerPrice': yeni_sl_hassas, 'reduceOnly': True}
+                        params={'triggerPrice': yeni_sl_hassas, 'reduceOnly': True, 'triggerPriceType': 3}
                     )
                 except: pass
 
