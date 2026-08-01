@@ -6,6 +6,7 @@ import pandas as pd
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Input, concatenate
+from tensorflow.keras import backend as K  # 👑 YENİ: RAM Koruması için eklendi
 import database as db
 
 MODEL_PATH = "ksvix_lstm_model.h5"
@@ -36,7 +37,6 @@ def yapay_zeka_egit(df):
                 y_num = 1.0 if row['yon'] == 'LONG' else 0.0
                 v_mesafe = float(row['vwap_mesafe']) if pd.notnull(row['vwap_mesafe']) else 0.0
                 
-                # 👑 YENİ LOBLARIN VERİLERİ (Hafıza Çağrısı)
                 t_4h = float(row['trend_4h']) if pd.notnull(row['trend_4h']) else 0.5
                 d_m = float(row['direnc_mesafe']) if pd.notnull(row['direnc_mesafe']) else 0.0
                 ds_m = float(row['destek_mesafe']) if pd.notnull(row['destek_mesafe']) else 0.0
@@ -49,10 +49,10 @@ def yapay_zeka_egit(df):
                     np.log1p(h) / 20.0,     
                     f / 100.0,              
                     np.tanh(v_mesafe / 5.0),
-                    t_4h,                   # Makro Trend (1=Boğa, 0=Ayı)
-                    np.tanh(d_m / 5.0),     # Direnç Mesafesi (Filtrelenmiş)
-                    np.tanh(ds_m / 5.0),    # Destek Mesafesi (Filtrelenmiş)
-                    np.tanh(s_o)            # Sıkışma / Formasyon Şiddeti
+                    t_4h,                   
+                    np.tanh(d_m / 5.0),     
+                    np.tanh(ds_m / 5.0),    
+                    np.tanh(s_o)            
                 ]
                 X_feat_list.append(feat)
                 y_list.append(row['sonuc'])
@@ -71,7 +71,6 @@ def yapay_zeka_egit(df):
     x1 = LSTM(64)(x1)
     x1 = Dropout(0.3)(x1)
     
-    # İndikatör Girişi: 10 Parametreye Çıktı!
     input_feat = Input(shape=(10,), name="indikator_girisi")
     x2 = Dense(32, activation='relu')(input_feat)
     
@@ -108,7 +107,6 @@ def sinyali_analiz_et(yon, rsi, macd, hacim, fear_greed, vwap_mesafe, trend_4h, 
     if os.path.exists(MODEL_PATH) and len(df) % 10 != 0:
         try:
             model = load_model(MODEL_PATH)
-            # Modelin girişi 10 oldu, eskisi varsa reddet ve yeniden eğit
             if model.input_shape[1][1] != 10: raise ValueError("Eski model")
         except:
             model = yapay_zeka_egit(df)
@@ -146,7 +144,12 @@ def sinyali_analiz_et(yon, rsi, macd, hacim, fear_greed, vwap_mesafe, trend_4h, 
         tahmin = model.predict([anlik_video, anlik_feat], verbose=0)
         basari_ihtimali = round(float(tahmin[0][0]) * 100, 2)
         if fear_greed <= 20: basari_ihtimali *= 0.8 
+        
+        # 👑 RAM KORUMASI: Tahmin bittikten sonra Keras'ın belleğini sıfırla
+        K.clear_session()
+        
         return len(df), basari_ihtimali
     except Exception as e:
         print(f"🛑 AI Tahmin Hatası: {e}")
+        K.clear_session()
         return len(df), 50.0
