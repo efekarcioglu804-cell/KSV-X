@@ -81,7 +81,14 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         sl_hassas = float(borsa.price_to_precision(sembol, sinyal['sl']))
 
         params = {'stopLossPrice': sl_hassas, 'reduceOnly': False}
-        emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=fiyat_hassas, params=params)
+        
+        # 👑 YENİ: MARKET Mİ LİMİT Mİ? TETİĞİ ONA GÖRE ÇEK!
+        if sinyal.get('is_market', False):
+            # Market Giriş: Fiyat sormadan anlık fiyattan tahtayı süpür
+            emir = await borsa.create_order(symbol=sembol, type='market', side=yon, amount=float(miktar), params=params)
+        else:
+            # Klasik Limit Giriş: Fiyatın gelmesini bekle
+            emir = await borsa.create_order(symbol=sembol, type='limit', side=yon, amount=float(miktar), price=fiyat_hassas, params=params)
         
         return {"durum": "BASARILI", "emir_id": emir['id'], "eski_silindi": eski_pusu_var}
 
