@@ -106,6 +106,10 @@ def init_db():
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN mum_gecmisi TEXT DEFAULT '[]'")
     except: pass
     
+    # 👑 CPU KORUMASI: 5 Saniyelik Ajan aramaları için Turbo İndeks
+    try: cursor.execute("CREATE INDEX IF NOT EXISTS idx_durum ON active_signals(durum)")
+    except: pass
+    
     conn.commit()
     conn.close()
 
