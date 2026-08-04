@@ -64,7 +64,6 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         except: pass
 
         bakiye = await borsa.fetch_balance({'type': 'swap'})
-        # 👑 DÜZELTME 1: Toplam cüzdan bakiyesini baz alıyoruz
         wallet_balance = float(bakiye.get('total', {}).get('USDT', 0))
         if wallet_balance < 2: return {"durum": "HATA", "hata_mesaji": "Bakiye Çok Düşük"}
 
@@ -81,7 +80,6 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         fiyat_hassas = float(borsa.price_to_precision(sembol, sinyal['giris']))
         sl_hassas = float(borsa.price_to_precision(sembol, sinyal['sl']))
 
-        # 👑 DÜZELTME 2: Stop için triggerPriceType 3 (Last Price) kullanıyoruz
         params = {'stopLossPrice': sl_hassas, 'reduceOnly': False, 'triggerPriceType': 3}
         
         if sinyal.get('is_market', False):
@@ -93,6 +91,56 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
 
     except Exception as e:
         return {"durum": "HATA", "hata_mesaji": str(e)}
+    finally:
+        try: await borsa.close()
+        except: pass
+
+# 👑 YENİ FONKSİYON: İşlem açıldığı an tüm TP'leri borsaya (Limit olarak) dizer
+async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_ratios):
+    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    try:
+        sembol = coin.replace('USDT', '') + '/USDT:USDT'
+        await borsa.load_markets()
+        hayalet_enjektor(borsa, sembol, coin)
+
+        # Borsa yavaşsa diye pozisyonu görene kadar 5 saniye dene
+        toplam_miktar = 0
+        for _ in range(5):
+            pozisyonlar = await borsa.fetch_positions([sembol])
+            if pozisyonlar:
+                poz = pozisyonlar[0]
+                toplam_miktar = abs(float(poz.get('contracts', 0) or poz.get('positionAmt', 0)))
+                if toplam_miktar > 0:
+                    break
+            await asyncio.sleep(1)
+
+        if toplam_miktar <= 0: return
+
+        oranlar = [float(x)/100.0 for x in tp_ratios.split(',')]
+        ters_yon = 'sell' if yon == 'LONG' else 'buy'
+
+        miktarlar = []
+        kalan_miktar = toplam_miktar
+        for i in range(3):
+            m = int(toplam_miktar * oranlar[i])
+            miktarlar.append(m)
+            kalan_miktar -= m
+        miktarlar.append(int(kalan_miktar))
+
+        for i, miktar in enumerate(miktarlar):
+            if miktar > 0:
+                fiyat_hassas = float(borsa.price_to_precision(sembol, tp_fiyatlar[i]))
+                try:
+                    await borsa.create_order(
+                        symbol=sembol,
+                        type='limit',
+                        side=ters_yon,
+                        amount=miktar,
+                        price=fiyat_hassas,
+                        params={'reduceOnly': True}
+                    )
+                except: pass
+    except: pass
     finally:
         try: await borsa.close()
         except: pass
@@ -140,49 +188,18 @@ async def acil_kapat(api_key, api_secret, coin, yon):
         except: pass
 
 async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, stop_mode, fiyatlar):
+    # 👑 DÜZELTME: Artık kâr satışını bu fonksiyon YÖNETMİYOR. Satışı borsadaki hazır limit emirleri anında yapıyor.
+    # Bu fonksiyon sadece fiyat TP'yi geçtiğinde eski stopu iptal edip YENİ HAREKETLİ STOPU kurar!
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         await borsa.load_markets()
         hayalet_enjektor(borsa, sembol, coin)
         
-        oranlar = [float(x) for x in tp_ratios.split(',')]
-        hedef_oran = oranlar[asama - 2]
-        
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
-        onceki_satilan_toplam = sum(oranlar[:asama-2]) if asama > 2 else 0
-        kalan_yuzde = 100.0 - onceki_satilan_toplam
-        
-        if asama == 5 or kalan_yuzde <= 0 or (hedef_oran / kalan_yuzde) >= 0.99: 
-            gercek_satis_orani = 1.0 
-        else: 
-            gercek_satis_orani = hedef_oran / kalan_yuzde
 
-        for deneme in range(3):
-            pozisyonlar = await borsa.fetch_positions([sembol])
-            if not pozisyonlar: break
-                
-            poz = pozisyonlar[0]
-            toplam_miktar = abs(float(poz.get('contracts', 0) or poz.get('positionAmt', 0)))
-            if toplam_miktar <= 0: break
-            
-            kapatilacak_miktar_ham = toplam_miktar * gercek_satis_orani
-            kapatilacak_miktar = int(kapatilacak_miktar_ham)
-            if kapatilacak_miktar < 1 and toplam_miktar >= 1: kapatilacak_miktar = 1
-            
-            if kapatilacak_miktar > 0:
-                try:
-                    await borsa.create_order(sembol, 'market', ters_yon, kapatilacak_miktar, params={'reduceOnly': True})
-                    break
-                except Exception as e: 
-                    await asyncio.sleep(1)
-            else: break
-
-        await asyncio.sleep(1)
-        
         guncel_pozisyonlar = await borsa.fetch_positions([sembol])
         if not guncel_pozisyonlar: return
-        
         kalan_gercek_miktar = abs(float(guncel_pozisyonlar[0].get('contracts', 0) or guncel_pozisyonlar[0].get('positionAmt', 0)))
 
         if stop_mode != 'NONE' and kalan_gercek_miktar > 0:
@@ -197,8 +214,20 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
             if yeni_sl:
                 yeni_sl_hassas = float(borsa.price_to_precision(sembol, yeni_sl))
                 try:
-                    await borsa.cancel_all_orders(sembol)
-                    # 👑 DÜZELTME 2 (Hareketli stoplar için): triggerPriceType 3
+                    # 👑 KRİTİK: cancel_all_orders YERİNE, sadece Stop-Loss emirlerini bulup siliyoruz ki TP limitlerimiz silinmesin!
+                    try:
+                        stop_orders = await borsa.fetch_open_stop_orders(sembol)
+                        for o in stop_orders:
+                            await borsa.cancel_order(o['id'], sembol)
+                    except:
+                        try:
+                            open_orders = await borsa.fetch_open_orders(sembol)
+                            for o in open_orders:
+                                if o.get('stopPrice') or o.get('info', {}).get('triggerPrice') or o.get('type') in ['stop', 'stop_market', 'stop_limit']:
+                                    await borsa.cancel_order(o['id'], sembol)
+                        except: pass
+
+                    # Yeni stop emrini kur
                     await borsa.create_order(
                         symbol=sembol, 
                         type='market', 
