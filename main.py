@@ -188,7 +188,6 @@ async def piyasa_fotografi_cek(borsa, sembol):
             cum_vp += tp * m[5]
             cum_vol += m[5]
             
-            # Önceki 15Dk'lık mumun VWAP mesafesini hesapla
             if i == len(mumlar) - 2:
                 onceki_vwap = cum_vp / cum_vol if cum_vol > 0 else m[4]
                 onceki_vwap_mesafe = ((m[4] - onceki_vwap) / onceki_vwap) * 100
@@ -340,31 +339,35 @@ async def genel_handler(event):
             islem_sayisi, ai_ihtimal = 0, 100.0
             coin = sinyal['coin']
             
+            # 👑 FORMASYON AVCISI BYPASS KONTROLÜ
+            is_formasyon_avcisi = "FORMASYON AVCISI" in mesaj.upper()
+            
             # 👑 KRALIN ÇİFT ONAYLI VWAP KURALI VE HACİM LİKİDİTE KALKANI
             dinamik_sinir = max(1.2, min(3.5, sikisma_orani * 1.5))
             red_nedeni = None
             
-            if sinyal['yon'] == 'LONG':
-                if vwap_mesafe <= 0.0 or vwap_mesafe > dinamik_sinir:
-                    red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
-                elif onceki_vwap_mesafe <= 0.0 or onceki_vwap_mesafe > dinamik_sinir:
-                    red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
-            elif sinyal['yon'] == 'SHORT':
-                if vwap_mesafe >= 0.0 or vwap_mesafe < -dinamik_sinir:
-                    red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
-                elif onceki_vwap_mesafe >= 0.0 or onceki_vwap_mesafe < -dinamik_sinir:
-                    red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+            if not is_formasyon_avcisi:
+                if sinyal['yon'] == 'LONG':
+                    if vwap_mesafe <= 0.0 or vwap_mesafe > dinamik_sinir:
+                        red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
+                    elif onceki_vwap_mesafe <= 0.0 or onceki_vwap_mesafe > dinamik_sinir:
+                        red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
+                elif sinyal['yon'] == 'SHORT':
+                    if vwap_mesafe >= 0.0 or vwap_mesafe < -dinamik_sinir:
+                        red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+                    elif onceki_vwap_mesafe >= 0.0 or onceki_vwap_mesafe < -dinamik_sinir:
+                        red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+                        
+                if not red_nedeni and hacim_degeri < 75000:
+                    red_nedeni = f"Yetersiz Hacim / Likidite (Minimum: 75.000 | Mevcut: {hacim_degeri:.2f})"
                     
-            if not red_nedeni and hacim_degeri < 75000:
-                red_nedeni = f"Yetersiz Hacim / Likidite (Minimum: 75.000 | Mevcut: {hacim_degeri:.2f})"
-                
-            if red_nedeni:
-                print(f"🛑 REDDEDİLDİ: #{coin} | Sebep: {red_nedeni}")
-                aktif_uyeler = db.get_all_active_users()
-                for uye in aktif_uyeler:
-                    try: await client.send_message(uye['telegram_id'], f"🛑 **#{coin} SİNYALİ REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
-                    except: pass
-                return
+                if red_nedeni:
+                    print(f"🛑 REDDEDİLDİ: #{coin} | Sebep: {red_nedeni}")
+                    aktif_uyeler = db.get_all_active_users()
+                    for uye in aktif_uyeler:
+                        try: await client.send_message(uye['telegram_id'], f"🛑 **#{coin} SİNYALİ REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
+                        except: pass
+                    return
             
             try:
                 islem_sayisi, ai_ihtimal = await asyncio.to_thread(
@@ -375,16 +378,21 @@ async def genel_handler(event):
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
             # 👑 OTONOM YARGIÇ REDDİ
-            if islem_sayisi >= 50 and ai_ihtimal < 70.0:
-                red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
-                print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
-                aktif_uyeler = db.get_all_active_users()
-                for uye in aktif_uyeler:
-                    try: await client.send_message(uye['telegram_id'], f"🤖 **#{coin} SİNYALİ AI TARAFINDAN REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
-                    except: pass
-                return
+            if not is_formasyon_avcisi:
+                if islem_sayisi >= 50 and ai_ihtimal < 70.0:
+                    red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
+                    print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
+                    aktif_uyeler = db.get_all_active_users()
+                    for uye in aktif_uyeler:
+                        try: await client.send_message(uye['telegram_id'], f"🤖 **#{coin} SİNYALİ AI TARAFINDAN REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
+                        except: pass
+                    return
 
-            ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`"
+            if is_formasyon_avcisi:
+                ai_ek_metin = f"\n🎯 **Strateji:** `Formasyon Avcısı (VIP Bypass)`\n🤖 **AI Arka Plan Skoru:** `%{ai_ihtimal}`"
+                print(f"⚡ FORMASYON AVCISI TESPİT EDİLDİ: #{coin} | Tüm Kalkanlar Delindi!")
+            else:
+                ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`"
                 
             try:
                 signal_id = db.sinyal_kaydet(
@@ -844,7 +852,7 @@ async def gunluk_pnl_raporlayici():
                         except: pass
 
                     cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, atr, en_iyi_fiyat, asama, durum FROM active_signals WHERE durum IN ('STOP_OLDU', 'FULL_TP')")
-                    kapananlar = cursor.fetchall()
+                    kapananlar =fetchall()
                     
                     islenen_idler_set = set(kasa["islenen_idler"])
                     yeni_islenen = 0
