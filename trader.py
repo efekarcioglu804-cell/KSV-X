@@ -95,37 +95,27 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         try: await borsa.close()
         except: pass
 
-# 👑 YENİ FONKSİYON: İşlem açıldığı an tüm TP'leri borsaya (Limit olarak) dizer
-async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_ratios):
+# 👑 DÜZELTME: Doğrudan toplam miktarı alıp MEXC API yormadan limitleri dizer.
+async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_ratios, toplam_miktar):
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         await borsa.load_markets()
         hayalet_enjektor(borsa, sembol, coin)
 
-        # Borsa yavaşsa diye pozisyonu görene kadar 5 saniye dene
-        toplam_miktar = 0
-        for _ in range(5):
-            pozisyonlar = await borsa.fetch_positions([sembol])
-            if pozisyonlar:
-                poz = pozisyonlar[0]
-                toplam_miktar = abs(float(poz.get('contracts', 0) or poz.get('positionAmt', 0)))
-                if toplam_miktar > 0:
-                    break
-            await asyncio.sleep(1)
-
-        if toplam_miktar <= 0: return
+        if float(toplam_miktar) <= 0: return
 
         oranlar = [float(x)/100.0 for x in tp_ratios.split(',')]
         ters_yon = 'sell' if yon == 'LONG' else 'buy'
 
         miktarlar = []
-        kalan_miktar = toplam_miktar
+        kalan_miktar = float(toplam_miktar)
         for i in range(3):
             m = int(toplam_miktar * oranlar[i])
+            if m < 1 and toplam_miktar >= 1: m = 1
             miktarlar.append(m)
             kalan_miktar -= m
-        miktarlar.append(int(kalan_miktar))
+        miktarlar.append(int(max(0, kalan_miktar)))
 
         for i, miktar in enumerate(miktarlar):
             if miktar > 0:
@@ -139,6 +129,7 @@ async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_rati
                         price=fiyat_hassas,
                         params={'reduceOnly': True}
                     )
+                    await asyncio.sleep(0.3) # Borsa API Spam Koruması
                 except: pass
     except: pass
     finally:
@@ -188,8 +179,6 @@ async def acil_kapat(api_key, api_secret, coin, yon):
         except: pass
 
 async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, stop_mode, fiyatlar):
-    # 👑 DÜZELTME: Artık kâr satışını bu fonksiyon YÖNETMİYOR. Satışı borsadaki hazır limit emirleri anında yapıyor.
-    # Bu fonksiyon sadece fiyat TP'yi geçtiğinde eski stopu iptal edip YENİ HAREKETLİ STOPU kurar!
     borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
@@ -214,7 +203,6 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
             if yeni_sl:
                 yeni_sl_hassas = float(borsa.price_to_precision(sembol, yeni_sl))
                 try:
-                    # 👑 KRİTİK: cancel_all_orders YERİNE, sadece Stop-Loss emirlerini bulup siliyoruz ki TP limitlerimiz silinmesin!
                     try:
                         stop_orders = await borsa.fetch_open_stop_orders(sembol)
                         for o in stop_orders:
@@ -227,7 +215,6 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
                                     await borsa.cancel_order(o['id'], sembol)
                         except: pass
 
-                    # Yeni stop emrini kur
                     await borsa.create_order(
                         symbol=sembol, 
                         type='market', 
