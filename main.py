@@ -12,7 +12,6 @@ from telethon import TelegramClient, events
 import config
 import database as db
 from parser import parse_signal
-# 👑 tp_emirlerini_diz fonksiyonu da içeri eklendi
 from trader import islem_ac, bekleyen_emri_iptal_et, pozisyon_guncelle, acil_kapat, tp_emirlerini_diz
 from visuals import create_pnl_image
 import ai_engine  
@@ -22,6 +21,9 @@ asyncio.set_event_loop(loop)
 
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
+
+# 👑 HAFIZA: TP'si dizilmiş işlemleri tekrar tekrar dizmemek için
+TP_DIZILEN_ISLEMLER = set()
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
     tp_fiyatlari = [tp1, tp2, tp3, tp4]
@@ -385,10 +387,10 @@ async def genel_handler(event):
                     return
 
             if is_formasyon_avcisi:
-                ai_ek_metin = f"\n🎯 **Strateji:** `Formasyon Avcısı (VIP Bypass)`\n🤖 **AI Arka Plan Skoru:** `%{ai_ihtimal}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) anında dizildi.`"
+                ai_ek_metin = f"\n🎯 **Strateji:** `Formasyon Avcısı (VIP Bypass)`\n🤖 **AI Arka Plan Skoru:** `%{ai_ihtimal}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`"
                 print(f"⚡ FORMASYON AVCISI TESPİT EDİLDİ: #{coin} | Tüm Kalkanlar Delindi!")
             else:
-                ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) anında dizildi.`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) anında dizildi.`"
+                ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`"
                 
             try:
                 signal_id = db.sinyal_kaydet(
@@ -461,7 +463,6 @@ async def fiyat_takip_radari():
                 conn = sqlite3.connect(db.DB_NAME, timeout=30)
                 try:
                     cursor = conn.cursor()
-                    # 👑 DÜZELTME: tp1, tp2, tp3, tp4'ü ekledik çünkü işlem açıldığı an limit TP'lerini dizeceğiz
                     cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, durum, asama, eklenme_zamani, katilanlar, kaldirac, atr, en_iyi_fiyat FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
                     bekleyenler = cursor.fetchall()
                     son_db_okuma = su_an
@@ -518,7 +519,6 @@ async def fiyat_takip_radari():
 
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
-                    
                     ksvix_kullanicilar = [str(u['telegram_id']) for u in aktif_uyeler if dict(u).get('ksvix_mode', 0) == 1]
                     
                     if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
@@ -547,7 +547,6 @@ async def fiyat_takip_radari():
                         bildirim = f"🟢 **İŞLEME GİRİLDİ** | #{coin}\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris} 🚀"
                 
                 elif durum == 'ISLEMDE':
-                    # 👑 Balina duvarı tespiti (Artık kârı borsa alıyor ama yine de asama'yı hızlı atlatmak için kalsın)
                     if asama >= 1 and asama < 5:
                         tp_fiyatlar = {1: tp1, 2: tp2, 3: tp3, 4: tp4}
                         hedef_fiyat = tp_fiyatlar.get(asama, tp1)
@@ -656,14 +655,10 @@ async def fiyat_takip_radari():
                     db_guncellemeler.append(("UPDATE active_signals SET durum = ?, asama = ? WHERE id = ?", (yeni_durum or durum, yeni_asama or asama, s_id)))
                     if bildirim: vip_mesajlar.append(bildirim)
 
-                    # 👑 DÜZELTME: İşlem açılır açılmaz TP Limit emirleri tahtaya diziliyor!
                     if yeni_durum == 'ISLEMDE' and durum == 'BEKLIYOR':
                         for uye in aktif_uyeler:
                             if str(uye['telegram_id']) in katilanlar_listesi:
-                                dm_mesajlar.append((uye['telegram_id'], f"🟢 **#{coin} İşleme Girildi!**\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris}\n🦅 KSVİX pusudan çıktı, TP Limitleri borsaya işleniyor!"))
-                                mexc_gorevleri.append(
-                                    tp_emirlerini_diz(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon, [tp1, tp2, tp3, tp4], uye['tp_ratios'])
-                                )
+                                dm_mesajlar.append((uye['telegram_id'], f"🟢 **#{coin} İşleme Girildi!**\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris}\n🦅 KSVİX pusudan çıktı, operasyon başladı!"))
 
                     if yeni_asama and yeni_asama > asama and yeni_asama >= 2:
                         tp_fiyatlar = {1: tp1, 2: tp2, 3: tp3, 4: tp4}
@@ -676,7 +671,7 @@ async def fiyat_takip_radari():
                                 if yeni_asama == 5:
                                     dm_mesajlar.append((uye['telegram_id'], f"👑 **#{coin} FULL TP Vuruldu!**\n🤑 Maksimum kâr cebinde! İşlem tamamen kapandı. 🥂"))
                                 else:
-                                    dm_mesajlar.append((uye['telegram_id'], f"🎯 **#{coin} TP{vurulan_tp} Vuruldu!**\n💸 Kısmi kâr (Borsa Limitiyle) anında satıldı (`+{tp_roe:.2f}%` {kaldirac}x ROE).\n🛡️ Stop kalkanı güncellendi! 🦅"))
+                                    dm_mesajlar.append((uye['telegram_id'], f"🎯 **#{coin} TP{vurulan_tp} Vuruldu!**\n💸 Kısmi kâr satıldı (`+{tp_roe:.2f}%` {kaldirac}x ROE).\n🛡️ Stop kalkanı güncellendi! 🦅"))
 
                     if yeni_asama and yeni_asama >= 2 and yeni_asama < 5:
                         fiyatlar = {'giris': giris, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3}
@@ -729,7 +724,6 @@ async def golge_senkronizator():
             conn = sqlite3.connect(db.DB_NAME, timeout=30)
             try:
                 cursor = conn.cursor()
-                # 👑 DÜZELTME: tp1, tp2, tp3, tp4'ü ekledik çünkü işlem açıldığı an limit TP'lerini dizeceğiz
                 cursor.execute("SELECT id, coin, yon, giris, tp1, tp2, tp3, tp4, katilanlar FROM active_signals WHERE durum = 'BEKLIYOR'")
                 bekleyenler = cursor.fetchall()
                 
@@ -740,15 +734,16 @@ async def golge_senkronizator():
                     try:
                         borsa = ccxt.mexc({'apiKey': uye['mexc_api_key'], 'secret': uye['mexc_api_secret'], 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
                         pozisyonlar = await borsa.fetch_positions()
-                        aktif_semboller = set()
+                        
+                        aktif_semboller = {}
                         for p in pozisyonlar:
-                            if float(p.get('contracts', 0) or p.get('positionAmt', 0)) > 0:
-                                aktif_semboller.add(p['symbol'])
+                            miktar = abs(float(p.get('contracts', 0) or p.get('positionAmt', 0)))
+                            if miktar > 0:
+                                aktif_semboller[p['symbol']] = miktar
                         
                         uye_tid = str(uye['telegram_id'])
                         sembol_para = "USDT" if uye['trade_mode'] == 'FIXED' else "%"
                         
-                        # 👑 Gölge Ajan işlemi ISLEMDE'ye geçirirse o an hemen Limit TP'leri diz
                         for b_id, coin, yon, giris, tp1, tp2, tp3, tp4, katilanlar in bekleyenler:
                             sembol = coin.replace('USDT', '') + '/USDT:USDT'
                             if sembol in aktif_semboller:
@@ -756,21 +751,31 @@ async def golge_senkronizator():
                                 conn.commit()
                                 
                                 katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
-                                msg = f"🟢 **#{coin} İşleme Girildi!**\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris}\n🦅 KSVİX pusudan çıktı, TP Limitleri borsaya işleniyor! (Ajan Onayı)"
+                                msg = f"🟢 **#{coin} İşleme Girildi!**\n⚡ **Yön:** {yon} | 🎯 **Giriş:** {giris}\n🦅 KSVİX pusudan çıktı, operasyon başladı! (Ajan Onayı)"
                                 if uye_tid in katilanlar_listesi:
-                                    try: 
-                                        await client.send_message(int(uye_tid), msg)
-                                        # İşlem açılır açılmaz TP'leri Limit emri olarak sırala!
-                                        client.loop.create_task(
-                                            tp_emirlerini_diz(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon, [tp1, tp2, tp3, tp4], uye['tp_ratios'])
-                                        )
+                                    try: await client.send_message(int(uye_tid), msg)
                                     except: pass
                         
                         for i_id, coin, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, asama, katilanlar in islemdekiler:
                             sembol = coin.replace('USDT', '') + '/USDT:USDT'
                             katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
                             
-                            if sembol not in aktif_semboller and uye_tid in katilanlar_listesi:
+                            if sembol in aktif_semboller and uye_tid in katilanlar_listesi:
+                                # 👑 LİMİT EMİR GARANTİSİ: İşlem içerideyken TP Limitleri dizilmemişse diz!
+                                islem_anahtari = f"{uye_tid}_{i_id}"
+                                if islem_anahtari not in TP_DIZILEN_ISLEMLER:
+                                    try:
+                                        acik_emirler = await borsa.fetch_open_orders(sembol)
+                                        tp_limit_var = any(e['type'] == 'limit' for e in acik_emirler)
+                                        if not tp_limit_var:
+                                            toplam_miktar = aktif_semboller[sembol]
+                                            client.loop.create_task(
+                                                tp_emirlerini_diz(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon, [tp1, tp2, tp3, tp4], uye['tp_ratios'], toplam_miktar)
+                                            )
+                                        TP_DIZILEN_ISLEMLER.add(islem_anahtari)
+                                    except: pass
+
+                            elif sembol not in aktif_semboller and uye_tid in katilanlar_listesi:
                                 katilanlar_listesi.remove(uye_tid)
                                 cursor.execute("UPDATE active_signals SET katilanlar = ? WHERE id = ?", (",".join(katilanlar_listesi), i_id))
                                 
