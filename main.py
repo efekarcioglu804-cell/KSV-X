@@ -630,7 +630,14 @@ async def genel_handler(event):
                         
                 gorevler.append(islem_ac(uye['mexc_api_key'], uye['mexc_api_secret'], ayarlar, sinyal))
                 
-            sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
+            sonuclar = []
+for gorev in gorevler:
+    try:
+        res = await gorev
+        sonuclar.append(res)
+        await asyncio.sleep(1.5) # 🛡️ MEXC API Spam / Ban Koruması (İstekler arasına 1.5 saniye mola)
+    except Exception as e:
+        sonuclar.append(e)
             
             for uye, sonuc in zip(hedef_uyeler, sonuclar):
                 telegram_id = uye['telegram_id']
