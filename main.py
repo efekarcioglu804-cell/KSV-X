@@ -9,9 +9,6 @@ import requests
 import ccxt.pro as ccxt 
 from telethon import TelegramClient, events
 
-# 👑 ESKİ KÜTÜPHANEYİ ÇÖPE ATTIK, YENİ NESİL AQ. DESTEKLİ GOOGLE-GENAI KURULDU
-from google import genai
-
 import config
 import database as db
 from parser import parse_signal
@@ -25,13 +22,7 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# 👑 JARVIS YAPAY ZEKA BEYNİ BAŞLATILIYOR (YENİ SİSTEM)
-if config.GEMINI_API_KEY:
-    jarvis_client = genai.Client(api_key=config.GEMINI_API_KEY)
-else:
-    jarvis_client = None
-
-SOHBET_HAFIZASI = {}
+# 👑 JARVIS YAPAY ZEKA: GOOGLE SDK ÇÖPE ATILDI, ÇIPLAK API KULLANILACAK
 TP_DIZILEN_ISLEMLER = set()
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
@@ -311,16 +302,10 @@ async def genel_handler(event):
             )
             await client.send_message(gonderen_id, sayac_msg)
             
-        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER (YENİ SİSTEM)
+        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER (ÇIPLAK REST API VURUŞU)
         else:
-            if jarvis_client:
+            if config.GEMINI_API_KEY:
                 try:
-                    if gonderen_id not in SOHBET_HAFIZASI:
-                        SOHBET_HAFIZASI[gonderen_id] = jarvis_client.chats.create(model='gemini-1.5-flash')
-                    
-                    sohbet = SOHBET_HAFIZASI[gonderen_id]
-                    
-                    # Veritabanından o günün bilançosunu çek
                     stats = db.get_daily_stats(gonderen_id)
                     kar = stats['kar_usdt'] if stats else 0.0
                     acilan = stats['acilan_islem'] if stats else 0
@@ -344,8 +329,22 @@ async def genel_handler(event):
                     3. Kısa, maskülen, net ve lafı dolandırmayan bir dille cevap ver.
                     """
                     
-                    cevap = sohbet.send_message(gizli_promt).text
-                    await client.send_message(gonderen_id, cevap)
+                    # 🚀 GOOGLE SDK'YI BYPASS EDEN ÇIPLAK REST API VURUŞU 🚀
+                    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={config.GEMINI_API_KEY}"
+                    
+                    payload = {
+                        "contents": [{"parts": [{"text": gizli_promt}]}]
+                    }
+                    
+                    res = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                    
+                    if res.status_code == 200:
+                        cevap = res.json()['candidates'][0]['content']['parts'][0]['text']
+                        await client.send_message(gonderen_id, cevap)
+                    else:
+                        print(f"Google API Reddedildi: {res.text}")
+                        await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
+
                 except Exception as e:
                     print(f"Jarvis AI Hatası: {e}")
                     await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
