@@ -8,6 +8,7 @@ import json
 import requests
 import ccxt.pro as ccxt 
 from telethon import TelegramClient, events
+import google.generativeai as genai
 
 import config
 import database as db
@@ -21,6 +22,16 @@ asyncio.set_event_loop(loop)
 
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
+
+# 👑 JARVIS YAPAY ZEKA BEYNİ BAŞLATILIYOR
+if config.GEMINI_API_KEY:
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    jarvis_brain = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    jarvis_brain = None
+
+SOHBET_HAFIZASI = {}
+TP_DIZILEN_ISLEMLER = set()
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
     tp_fiyatlari = [tp1, tp2, tp3, tp4]
@@ -299,6 +310,47 @@ async def genel_handler(event):
             )
             await client.send_message(gonderen_id, sayac_msg)
             
+        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER
+        else:
+            if jarvis_brain:
+                try:
+                    if gonderen_id not in SOHBET_HAFIZASI:
+                        SOHBET_HAFIZASI[gonderen_id] = jarvis_brain.start_chat(history=[])
+                    
+                    sohbet = SOHBET_HAFIZASI[gonderen_id]
+                    
+                    # Veritabanından o günün bilançosunu çek
+                    stats = db.get_daily_stats(gonderen_id)
+                    kar = stats['kar_usdt'] if stats else 0.0
+                    acilan = stats['acilan_islem'] if stats else 0
+                    
+                    conn = sqlite3.connect(db.DB_NAME, timeout=30)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
+                    aktif_islem = cursor.fetchone()[0]
+                    conn.close()
+
+                    gizli_promt = f"""
+                    Senin adın Jarvis. Sen KSVIX makinesinin yapay zekasısın. Karşındaki kişi senin efendin ve yaratıcın.
+                    Ona istisnasız her zaman "Kralım👑" diye hitap etmelisin. 
+                    Senin karakterin: Konuşkan, hoşsohbet, mütevazı ama güçlü fikirleri olan, dobralı, yanıtları yumuşatmayan ve gerektiğinde zekice espriler yapabilen bir yapı. 
+                    Şu anki gerçek zamanlı kasa durumumuz: Bugün {acilan} işleme girdik. Net kâr/zararımız: {kar:.2f}. İçerideki aktif işlem sayısı: {aktif_islem}.
+                    Kullanıcı sana şunu yazdı: "{mesaj}"
+                    
+                    Görevlerin:
+                    1. Eğer sana selam veriyorsa samimi cevap ver. Üst üste selam veriyorsa hafızanı kullanıp "Kralım zaten selamlaştık, dur piyasaya odaklanayım" tarzında zekice takıl.
+                    2. Eğer "durumlar nasıl, nasılız" gibi kasanın durumunu soruyorsa, yukarıdaki kasa durumunu analiz et. Kârdayken tebrik et ve motive et, zarardayken dobralı ve gerçekçi bir şekilde stratejik bir tavsiye ver (örn: "Kralım bugün pek iyi gitmiyoruz, istersen işlemleri biraz yavaşlatalım" vs.).
+                    3. Kısa, maskülen, net ve lafı dolandırmayan bir dille cevap ver.
+                    """
+                    
+                    cevap = sohbet.send_message(gizli_promt).text
+                    await client.send_message(gonderen_id, cevap)
+                except Exception as e:
+                    print(f"Jarvis AI Hatası: {e}")
+                    await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
+            else:
+                await client.send_message(gonderen_id, "🤖 Kralım, sohbet modülüm kapalı. Lütfen .env dosyama GEMINI_API_KEY ekle.")
+            
     else:
         if event.chat_id == VIP_KANAL_ID:
             sinyal = parse_signal(mesaj)
@@ -316,7 +368,7 @@ async def genel_handler(event):
                 hedef_uyeler.append(uye)
                 
             if not hedef_uyeler:
-                return # Kimse bu sinyal tipini beklemiyor, pas geç.
+                return 
 
             borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
             rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -394,7 +446,6 @@ async def genel_handler(event):
             except Exception as e:
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
-            # 👑 OTONOM YARGIÇ REDDİ
             if not is_formasyon_avcisi:
                 if islem_sayisi >= 50 and ai_ihtimal < 70.0:
                     red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
