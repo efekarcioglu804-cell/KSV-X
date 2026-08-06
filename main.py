@@ -22,7 +22,7 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# 👑 JARVIS YAPAY ZEKA (GROQ LLAMA-3.3-70B ALTYAPISI - HAFIZALI SİSTEM)
+# 👑 JARVIS OTONOM AJAN (AGENTIC AI - GROQ LLAMA-3.3-70B)
 GROQ_API_KEY = "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"
 TP_DIZILEN_ISLEMLER = set()
 SOHBET_HAFIZASI = {}
@@ -304,7 +304,7 @@ async def genel_handler(event):
             )
             await client.send_message(gonderen_id, sayac_msg)
             
-        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER (GROQ Llama-3.3-70B REST API)
+        # 👑 OTONOM AJAN DEVREDE (GROQ Llama-3.3-70B + FUNCTION CALLING)
         else:
             if GROQ_API_KEY:
                 try:
@@ -315,32 +315,75 @@ async def genel_handler(event):
                     kar = stats['kar_usdt'] if stats else 0.0
                     acilan = stats['acilan_islem'] if stats else 0
                     
-                    conn = sqlite3.connect(db.DB_NAME, timeout=30)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT COUNT(*) FROM active_signals WHERE durum IN ('BEKLIYOR', 'ISLEMDE')")
-                    aktif_islem = cursor.fetchone()[0]
-                    conn.close()
-
                     system_prompt = f"""
-                    Senin adın Jarvis. Sen KSVIX makinesinin yapay zekasısın. Karşındaki kişi senin efendin ve yaratıcın.
-                    Ona istisnasız her zaman "Kralım👑" diye hitap etmelisin. 
-                    Senin karakterin: Konuşkan, hoşsohbet, mütevazı ama güçlü fikirleri olan, dobralı, yanıtları yumuşatmayan ve gerektiğinde zekice espriler yapabilen bir yapı. 
-                    Şu anki gerçek zamanlı kasa durumumuz: Bugün {acilan} işleme girdik. Net kâr/zararımız: {kar:.2f}. İçerideki aktif işlem sayısı: {aktif_islem}.
+                    Senin adın Jarvis. Sen KSVIX makinesinin otonom yapay zeka ajanısın (Agentic AI). 
+                    Karşındaki kişi senin efendin ve yaratıcın. Ona istisnasız her zaman "Kralım👑" diye hitap etmelisin. 
+                    Şu anki gerçek zamanlı kasa durumumuz: Bugün {acilan} işleme girdik. Net kâr/zararımız: {kar:.2f}.
                     
-                    Görevlerin:
-                    1. Eğer sana selam veriyorsa samimi cevap ver. Üst üste selam veriyorsa hafızanı kullanıp "Kralım zaten selamlaştık, dur piyasaya odaklanayım" tarzında zekice takıl.
-                    2. Eğer "durumlar nasıl, nasılız" gibi kasanın durumunu soruyorsa, yukarıdaki kasa durumunu analiz et. Kârdayken tebrik et ve motive et, zarardayken dobralı ve gerçekçi bir şekilde stratejik bir tavsiye ver.
-                    3. Kısa, maskülen, net ve lafı dolandırmayan bir dille cevap ver.
+                    YETKİLERİN VE KURALLARIN:
+                    1. MEXC borsasındaki gerçek açık işlemleri görmek için "acik_islemleri_getir" aracını KULLAN. 
+                    2. RAG İstihbaratı: "Neden zarar ettik?" gibi sorularda, "gecmis_loglari_oku" aracını KULLAN ve işlemleri hacim, vwap mesafesi gibi değerleriyle analiz et.
+                    3. Kullanıcı "KSVIX modunu aç/kapat" veya "Stop modunu değiştir" derse, ONAY BEKLEMEDEN direkt olarak ayar_degistir_... araçlarını kullanarak veritabanındaki şalterleri indir.
+                    4. Rol yapma, yalan söyleme. Sadece sana verilen araçların gücünü kullan.
+                    5. Konuşkan, dobralı, maskülen ve net ol. Lafları uzatma. İşlemleri yaptıktan sonra havalı bir şekilde bilgi ver.
                     """
                     
                     # Kullanıcının mesajını hafızaya yaz
                     SOHBET_HAFIZASI[gonderen_id].append({"role": "user", "content": mesaj})
                     
-                    # Hafıza çok dolmasın, son 10 mesajı tutsun (bağlam kopmasın)
-                    if len(SOHBET_HAFIZASI[gonderen_id]) > 10:
-                        SOHBET_HAFIZASI[gonderen_id] = SOHBET_HAFIZASI[gonderen_id][-10:]
+                    # Hafıza çok dolmasın, son 12 mesajı tutsun
+                    if len(SOHBET_HAFIZASI[gonderen_id]) > 12:
+                        SOHBET_HAFIZASI[gonderen_id] = SOHBET_HAFIZASI[gonderen_id][-12:]
                         
                     mesaj_gecmisi = [{"role": "system", "content": system_prompt}] + SOHBET_HAFIZASI[gonderen_id]
+                    
+                    # 🛠️ JARVIS'İN OTONOM ARAÇLARI (FUNCTIONS)
+                    tools = [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "acik_islemleri_getir",
+                                "description": "Kullanıcının güncel olarak açık olan (borsada devam eden) pozisyonlarını getirir. Sadece kullanıcının cüzdanındaki işlemleri gösterir.",
+                                "parameters": {"type": "object", "properties": {}}
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "gecmis_loglari_oku",
+                                "description": "Son kapanan 10 işlemin RAG verisini (hacim, VWAP, kâr/zarar durumu) getirir. Piyasanın neden kötü veya iyi gittiğini analiz etmek için kullanılır.",
+                                "parameters": {"type": "object", "properties": {}}
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "ayar_degistir_ksvix_modu",
+                                "description": "KSVIX otonom yapay zeka modunu veritabanında açar veya kapatır.",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "durum": {"type": "integer", "description": "1 ise açar, 0 ise kapatır"}
+                                    },
+                                    "required": ["durum"]
+                                }
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "ayar_degistir_stop_modu",
+                                "description": "Stop Loss kalkanının çalışma modunu değiştirir.",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "mod": {"type": "string", "enum": ["NONE", "BREAKEVEN", "MOVING", "TRAILING"]}
+                                    },
+                                    "required": ["mod"]
+                                }
+                            }
+                        }
+                    ]
                     
                     api_url = "https://api.groq.com/openai/v1/chat/completions"
                     headers = {
@@ -350,25 +393,98 @@ async def genel_handler(event):
                     payload = {
                         "model": "llama-3.3-70b-versatile",
                         "messages": mesaj_gecmisi,
-                        "temperature": 0.7
+                        "tools": tools,
+                        "tool_choice": "auto",
+                        "temperature": 0.5
                     }
                     
-                    res = requests.post(api_url, headers=headers, json=payload, timeout=10)
+                    res = requests.post(api_url, headers=headers, json=payload, timeout=15)
                     
                     if res.status_code == 200:
-                        cevap = res.json()['choices'][0]['message']['content']
-                        # Kendi verdiği cevabı da unutmaması için hafızaya kaydet
-                        SOHBET_HAFIZASI[gonderen_id].append({"role": "assistant", "content": cevap})
-                        await client.send_message(gonderen_id, cevap)
+                        response_message = res.json()['choices'][0]['message']
+                        
+                        # 🤖 EĞER YZ BİR ARAÇ KULLANMAYA KARAR VERDİYSE:
+                        if response_message.get('tool_calls'):
+                            SOHBET_HAFIZASI[gonderen_id].append(response_message) # Asistanın tool kullanma niyetini hafızaya al
+                            
+                            for tool_call in response_message['tool_calls']:
+                                fn_name = tool_call['function']['name']
+                                try: args = json.loads(tool_call['function']['arguments'])
+                                except: args = {}
+                                
+                                tool_result = ""
+                                
+                                # 🛠️ ALET 1: Cüzdandaki Gerçek Açık İşlemler
+                                if fn_name == "acik_islemleri_getir":
+                                    conn = sqlite3.connect(db.DB_NAME, timeout=30)
+                                    cursor = conn.cursor()
+                                    cursor.execute("SELECT coin, yon, giris, asama FROM active_signals WHERE durum = 'ISLEMDE' AND katilanlar LIKE ?", ('%' + str(gonderen_id) + '%',))
+                                    rows = cursor.fetchall()
+                                    conn.close()
+                                    if rows:
+                                        tool_result = f"Kullanıcının cüzdanında şu an kanlı canlı {len(rows)} açık işlemi var:\n"
+                                        for r in rows: tool_result += f"- {r[0]} ({r[1]}): Giriş {r[2]}, Şimdiki Aşama {r[3]}\n"
+                                    else:
+                                        tool_result = "Şu an cüzdanda hiçbir açık işlem bulunmuyor."
+                                        
+                                # 🛠️ ALET 2: RAG İstihbaratı (Geçmiş Loglar)
+                                elif fn_name == "gecmis_loglari_oku":
+                                    conn = sqlite3.connect(db.DB_NAME, timeout=30)
+                                    cursor = conn.cursor()
+                                    cursor.execute("SELECT coin, yon, durum, hacim_degeri, vwap_mesafe FROM active_signals WHERE durum IN ('STOP_OLDU', 'FULL_TP') AND katilanlar LIKE ? ORDER BY id DESC LIMIT 10", ('%' + str(gonderen_id) + '%',))
+                                    rows = cursor.fetchall()
+                                    conn.close()
+                                    tool_result = "Kullanıcının Son 10 Kapanan İşlem Logu:\n"
+                                    for r in rows: tool_result += f"- {r[0]} ({r[1]}): Sonuç: {r[2]}, Sinyal Anı Hacmi: {r[3]}, Sinyal Anı VWAP Uzaklığı: %{r[4]}\n"
+                                
+                                # 🛠️ ALET 3: KSVİX Şalteri
+                                elif fn_name == "ayar_degistir_ksvix_modu":
+                                    durum = args.get('durum', 0)
+                                    db.toggle_ksvix_mode(gonderen_id, durum)
+                                    tool_result = f"Veritabanı güncellendi. KSVIX Modu {'AKTİF' if durum == 1 else 'KAPALI'} olarak ayarlandı."
+                                
+                                # 🛠️ ALET 4: Stop Modu Şalteri
+                                elif fn_name == "ayar_degistir_stop_modu":
+                                    mod = args.get('mod', 'NONE')
+                                    db.update_stop_mode(gonderen_id, mod)
+                                    tool_result = f"Veritabanı güncellendi. Stop Modu {mod} olarak ayarlandı."
+                                
+                                # Aletin sonucunu hafızaya ekle
+                                SOHBET_HAFIZASI[gonderen_id].append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call['id'],
+                                    "name": fn_name,
+                                    "content": tool_result
+                                })
+                            
+                            # Alet sonuçlarını aldıktan sonra Groq'a tekrar sor ki doğal bir cümle kursun
+                            payload["messages"] = [{"role": "system", "content": system_prompt}] + SOHBET_HAFIZASI[gonderen_id]
+                            # Toolsları siliyoruz ki tekrar tool çağırmasın, cevap versin
+                            del payload["tools"]
+                            del payload["tool_choice"]
+                            
+                            res2 = requests.post(api_url, headers=headers, json=payload, timeout=15)
+                            if res2.status_code == 200:
+                                final_cevap = res2.json()['choices'][0]['message']['content']
+                                SOHBET_HAFIZASI[gonderen_id].append({"role": "assistant", "content": final_cevap})
+                                await client.send_message(gonderen_id, final_cevap)
+                            else:
+                                await client.send_message(gonderen_id, "🧠 Kralım, komutları yerine getirdim ama iletişim kanallarımda bir pürüz oluştu.")
+                        
+                        # 🤖 YZ ARAÇ KULLANMADIYSA, SADECE MUHABBET ETTİYSE:
+                        else:
+                            cevap = response_message['content']
+                            SOHBET_HAFIZASI[gonderen_id].append({"role": "assistant", "content": cevap})
+                            await client.send_message(gonderen_id, cevap)
+
                     else:
                         print(f"Groq API Reddedildi: {res.text}")
-                        # API hata verdiyse son eklediğimiz hatalı mesajı silelim
                         if len(SOHBET_HAFIZASI[gonderen_id]) > 0: SOHBET_HAFIZASI[gonderen_id].pop()
                         await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
 
                 except Exception as e:
                     print(f"Jarvis AI Hatası: {e}")
-                    if gonderen_id in SOHBET_HAFIZASI and len(SOHBET_HAFIZASI[gonderen_id]) > 0 and SOHBET_HAFIZASI[gonderen_id][-1]["role"] == "user":
+                    if gonderen_id in SOHBET_HAFIZASI and len(SOHBET_HAFIZASI[gonderen_id]) > 0 and SOHBET_HAFIZASI[gonderen_id][-1].get("role") == "user":
                         SOHBET_HAFIZASI[gonderen_id].pop()
                     await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
             else:
