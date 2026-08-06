@@ -26,7 +26,7 @@ VIP_KANAL_ID = int(config.VIP_CHANNEL)
 GROQ_API_KEY = "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"
 TP_DIZILEN_ISLEMLER = set()
 SOHBET_HAFIZASI = {}
-MEXC_EMIR_KILIDI = asyncio.Lock() # 🛡️ YENİ EKLENEN KÜRESEL KİLİT
+MEXC_EMIR_KILIDI = asyncio.Lock() # 🛡️ KÜRESEL KİLİT
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
     tp_fiyatlari = [tp1, tp2, tp3, tp4]
@@ -510,159 +510,161 @@ async def genel_handler(event):
             if not hedef_uyeler:
                 return 
 
-            borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
-            rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video = 0.5, 0.0, 0.0, 0.0, '[]'
-            fng = get_fear_and_greed()
-            
-            try:
-                sembol_tmp = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
-                await borsa_tmp.load_markets()
-                hayalet_enjektor(borsa_tmp, sembol_tmp, sinyal['coin'])
-                
-                (rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe,
-                 trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video) = await piyasa_fotografi_cek(borsa_tmp, sembol_tmp)
-                
-                ticker = await borsa_tmp.fetch_ticker(sembol_tmp)
-                fiyat_mexc = float(ticker['last'])
-                giris_fiyati = float(sinyal['giris'])
-                
-                if fiyat_mexc > 0 and giris_fiyati > 0:
-                    oran = giris_fiyati / fiyat_mexc
-                    if oran > 5: 
-                        carpan = 10 ** round(math.log10(oran))
-                        sinyal['giris'] /= carpan
-                        sinyal['tp1'] /= carpan
-                        sinyal['tp2'] /= carpan
-                        sinyal['tp3'] /= carpan
-                        sinyal['tp4'] /= carpan
-                        sinyal['sl'] /= carpan
-                    elif oran < 0.2: 
-                        carpan = 10 ** round(math.log10(1/oran))
-                        sinyal['giris'] *= carpan
-                        sinyal['tp1'] *= carpan
-                        sinyal['tp2'] *= carpan
-                        sinyal['tp3'] *= carpan
-                        sinyal['tp4'] *= carpan
-                        sinyal['sl'] *= carpan
-            except: pass
-            finally: 
-                try: await borsa_tmp.close()
-                except: pass
-
-            islem_sayisi, ai_ihtimal = 0, 100.0
-            coin = sinyal['coin']
-            
-            # 🛡️ YENİ: Sentetik Varlık / Hisse Senedi Kalkanı
-            if "STOCK" in coin.upper() or "COPPER" in coin.upper():
-                print(f"🛑 SENTETİK VARLIK REDDEDİLDİ: #{coin} (MEXC API Desteklemez)")
-                return
-            
-            dinamik_sinir = max(1.2, min(3.5, sikisma_orani * 1.5))
-            red_nedeni = None
-            
-            if not is_formasyon_avcisi:
-                if sinyal['yon'] == 'LONG':
-                    if vwap_mesafe <= 0.0 or vwap_mesafe > dinamik_sinir:
-                        red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
-                    elif onceki_vwap_mesafe <= 0.0 or onceki_vwap_mesafe > dinamik_sinir:
-                        red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
-                elif sinyal['yon'] == 'SHORT':
-                    if vwap_mesafe >= 0.0 or vwap_mesafe < -dinamik_sinir:
-                        red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
-                    elif onceki_vwap_mesafe >= 0.0 or onceki_vwap_mesafe < -dinamik_sinir:
-                        red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
-                        
-                if not red_nedeni and hacim_degeri < 75000:
-                    red_nedeni = f"Yetersiz Hacim / Likidite (Minimum: 75.000 | Mevcut: {hacim_degeri:.2f})"
-                    
-                if red_nedeni:
-                    print(f"🛑 REDDEDİLDİ: #{coin} | Sebep: {red_nedeni}")
-                    for uye in hedef_uyeler:
-                        try: await client.send_message(uye['telegram_id'], f"🛑 **#{coin} SİNYALİ REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
-                        except: pass
-                    return
-            
-            try:
-                islem_sayisi, ai_ihtimal = await asyncio.to_thread(
-                    ai_engine.sinyali_analiz_et, sinyal['yon'], rsi_degeri, macd_degeri, 
-                    hacim_degeri, fng, vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video
-                )
-            except Exception as e:
-                print(f"⚠️ AI Analiz Hatası: {e}")
-
-            if not is_formasyon_avcisi:
-                if islem_sayisi >= 50 and ai_ihtimal < 70.0:
-                    red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
-                    print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
-                    for uye in hedef_uyeler:
-                        try: await client.send_message(uye['telegram_id'], f"🤖 **#{coin} SİNYALİ AI TARAFINDAN REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
-                        except: pass
-                    return
-
-            if is_formasyon_avcisi:
-                ai_ek_metin = f"\n🎯 **Strateji:** `Formasyon Avcısı (VIP Bypass)`\n🤖 **AI Arka Plan Skoru:** `%{ai_ihtimal}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`"
-                print(f"⚡ FORMASYON AVCISI TESPİT EDİLDİ: #{coin} | Tüm Kalkanlar Delindi!")
-            else:
-                ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`"
-                
-            try:
-                signal_id = db.sinyal_kaydet(
-                    sinyal['coin'], sinyal['yon'], sinyal['giris'], 
-                    sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl'], 
-                    sinyal['kaldirac'], rsi_degeri, macd_degeri, hacim_degeri, atr, fng, 
-                    vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video
-                )
-            except Exception as e:
-                print(f"🛑 DB KAYIT HATASI (sinyal_kaydet): {e}")
-                return
-            
-            conn = sqlite3.connect(db.DB_NAME, timeout=30)
-            try:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE active_signals SET durum = 'IPTAL' WHERE coin = ? AND durum = 'BEKLIYOR' AND id != ?", (sinyal['coin'], signal_id))
-                conn.commit()
-            except: pass
-            finally: conn.close()
-            
-            gorevler = []
-            for uye in hedef_uyeler:
-                ayarlar = {'trade_mode': uye['trade_mode'], 'trade_amount': uye['trade_amount'], 'max_trades': uye['max_trades']}
-                
-                if dict(uye).get('ksvix_mode', 0) == 1 and uye['trade_mode'] == 'PERCENT' and islem_sayisi >= 50:
-                    if ai_ihtimal >= 80.0:
-                        ayarlar['trade_amount'] *= 2.0
-                        print(f"🔥 KSVİX MODU: {uye['telegram_id']} için risk 2x yapıldı! (AI: %{ai_ihtimal})")
-                        
-                gorevler.append(islem_ac(uye['mexc_api_key'], uye['mexc_api_secret'], ayarlar, sinyal))
-                
-            # 🛡️ MEXC WAF KORUMASI: Sinyaller aynı milisaniyede gelse bile sıraya sokulur!
+            # 🛡️ DEVASA KÜRESEL KİLİT (WAF KORUMASI BURAYA ALINDI)
+            # Tüm OHLCV çekimleri, AI analizleri ve emir atma işlemleri tamamen sıraya sokuldu!
             async with MEXC_EMIR_KILIDI:
-                sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
-                await asyncio.sleep(0.5) # Güvenlik duvarını delmek için sadece yarım saniyelik nefes
-            
-            for uye, sonuc in zip(hedef_uyeler, sonuclar):
-                telegram_id = uye['telegram_id']
-                if isinstance(sonuc, Exception): pass
-                elif sonuc.get('durum') == 'BASARILI':
-                    try:
-                        db.sinyale_katilan_ekle(signal_id, telegram_id)
-                        db.update_daily_stat(telegram_id, 'open', value=1)
+
+                borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+                rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+                trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video = 0.5, 0.0, 0.0, 0.0, '[]'
+                fng = get_fear_and_greed()
+                
+                try:
+                    sembol_tmp = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
+                    await borsa_tmp.load_markets()
+                    hayalet_enjektor(borsa_tmp, sembol_tmp, sinyal['coin'])
+                    
+                    (rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe,
+                     trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video) = await piyasa_fotografi_cek(borsa_tmp, sembol_tmp)
+                    
+                    ticker = await borsa_tmp.fetch_ticker(sembol_tmp)
+                    fiyat_mexc = float(ticker['last'])
+                    giris_fiyati = float(sinyal['giris'])
+                    
+                    if fiyat_mexc > 0 and giris_fiyati > 0:
+                        oran = giris_fiyati / fiyat_mexc
+                        if oran > 5: 
+                            carpan = 10 ** round(math.log10(oran))
+                            sinyal['giris'] /= carpan
+                            sinyal['tp1'] /= carpan
+                            sinyal['tp2'] /= carpan
+                            sinyal['tp3'] /= carpan
+                            sinyal['tp4'] /= carpan
+                            sinyal['sl'] /= carpan
+                        elif oran < 0.2: 
+                            carpan = 10 ** round(math.log10(1/oran))
+                            sinyal['giris'] *= carpan
+                            sinyal['tp1'] *= carpan
+                            sinyal['tp2'] *= carpan
+                            sinyal['tp3'] *= carpan
+                            sinyal['tp4'] *= carpan
+                            sinyal['sl'] *= carpan
+                except: pass
+                finally: 
+                    try: await borsa_tmp.close()
                     except: pass
-                    
-                    ksvix_not = "\n🔥 **KSVİX Modu Aktif:** Fırsat avı için marjin 2x yükseltildi!" if (dict(uye).get('ksvix_mode', 0) == 1 and uye['trade_mode'] == 'PERCENT' and ai_ihtimal >= 80.0) else ""
-                    
-                    if sonuc.get('eski_silindi'):
-                        mesaj_metni = f"✅ **#{sinyal['coin']} Sinyali Alındı!**{ai_ek_metin}{ksvix_not}\n🧹 Eski pusu emri iptal edildi, yeni sinyale geçildi. 🦅"
-                    else:
-                        mesaj_metni = f"✅ **#{sinyal['coin']} Sinyali Alındı!**{ai_ek_metin}{ksvix_not}\nPusudayız. 🦅"
+
+                islem_sayisi, ai_ihtimal = 0, 100.0
+                coin = sinyal['coin']
+                
+                # 🛡️ YENİ: Sentetik Varlık / Hisse Senedi Kalkanı
+                if "STOCK" in coin.upper() or "COPPER" in coin.upper():
+                    print(f"🛑 SENTETİK VARLIK REDDEDİLDİ: #{coin} (MEXC API Desteklemez)")
+                    return
+                
+                dinamik_sinir = max(1.2, min(3.5, sikisma_orani * 1.5))
+                red_nedeni = None
+                
+                if not is_formasyon_avcisi:
+                    if sinyal['yon'] == 'LONG':
+                        if vwap_mesafe <= 0.0 or vwap_mesafe > dinamik_sinir:
+                            red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
+                        elif onceki_vwap_mesafe <= 0.0 or onceki_vwap_mesafe > dinamik_sinir:
+                            red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: 0 ile {dinamik_sinir:.2f})"
+                    elif sinyal['yon'] == 'SHORT':
+                        if vwap_mesafe >= 0.0 or vwap_mesafe < -dinamik_sinir:
+                            red_nedeni = f"VWAP Uyuşmazlığı (Şu Anki Mum: %{vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+                        elif onceki_vwap_mesafe >= 0.0 or onceki_vwap_mesafe < -dinamik_sinir:
+                            red_nedeni = f"VWAP Uyuşmazlığı (Önceki 15Dk Mum: %{onceki_vwap_mesafe:.2f} | İstenen: -{dinamik_sinir:.2f} ile 0)"
+                            
+                    if not red_nedeni and hacim_degeri < 75000:
+                        red_nedeni = f"Yetersiz Hacim / Likidite (Minimum: 75.000 | Mevcut: {hacim_degeri:.2f})"
                         
-                    try: await client.send_message(telegram_id, mesaj_metni)
-                    except: pass
+                    if red_nedeni:
+                        print(f"🛑 REDDEDİLDİ: #{coin} | Sebep: {red_nedeni}")
+                        for uye in hedef_uyeler:
+                            try: await client.send_message(uye['telegram_id'], f"🛑 **#{coin} SİNYALİ REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
+                            except: pass
+                        return
+                
+                try:
+                    islem_sayisi, ai_ihtimal = await asyncio.to_thread(
+                        ai_engine.sinyali_analiz_et, sinyal['yon'], rsi_degeri, macd_degeri, 
+                        hacim_degeri, fng, vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video
+                    )
+                except Exception as e:
+                    print(f"⚠️ AI Analiz Hatası: {e}")
+
+                if not is_formasyon_avcisi:
+                    if islem_sayisi >= 50 and ai_ihtimal < 70.0:
+                        red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
+                        print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
+                        for uye in hedef_uyeler:
+                            try: await client.send_message(uye['telegram_id'], f"🤖 **#{coin} SİNYALİ AI TARAFINDAN REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
+                            except: pass
+                        return
+
+                if is_formasyon_avcisi:
+                    ai_ek_metin = f"\n🎯 **Strateji:** `Formasyon Avcısı (VIP Bypass)`\n🤖 **AI Arka Plan Skoru:** `%{ai_ihtimal}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`"
+                    print(f"⚡ FORMASYON AVCISI TESPİT EDİLDİ: #{coin} | Tüm Kalkanlar Delindi!")
                 else:
-                    hata_nedeni = sonuc.get('hata_mesaji', 'Bilinmiyor')
-                    try: await client.send_message(telegram_id, f"⚠️ **#{sinyal['coin']} Pas Geçildi!**\n🛑 **Sebep:** `{hata_nedeni}`")
-                    except: pass
+                    ai_ek_metin = f"\n🤖 **AI Başarı Tahmini:** `%{ai_ihtimal}`\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`" if islem_sayisi >= 50 else f"\n📉 **VWAP Çizgisine Uzaklık:** `% {vwap_mesafe}`\n⚡ **Hız:** `Borsaya Limit Emirleri (TP) otonom diziliyor.`"
+                    
+                try:
+                    signal_id = db.sinyal_kaydet(
+                        sinyal['coin'], sinyal['yon'], sinyal['giris'], 
+                        sinyal['tp1'], sinyal['tp2'], sinyal['tp3'], sinyal['tp4'], sinyal['sl'], 
+                        sinyal['kaldirac'], rsi_degeri, macd_degeri, hacim_degeri, atr, fng, 
+                        vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video
+                    )
+                except Exception as e:
+                    print(f"🛑 DB KAYIT HATASI (sinyal_kaydet): {e}")
+                    return
+                
+                conn = sqlite3.connect(db.DB_NAME, timeout=30)
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE active_signals SET durum = 'IPTAL' WHERE coin = ? AND durum = 'BEKLIYOR' AND id != ?", (sinyal['coin'], signal_id))
+                    conn.commit()
+                except: pass
+                finally: conn.close()
+                
+                gorevler = []
+                for uye in hedef_uyeler:
+                    ayarlar = {'trade_mode': uye['trade_mode'], 'trade_amount': uye['trade_amount'], 'max_trades': uye['max_trades']}
+                    
+                    if dict(uye).get('ksvix_mode', 0) == 1 and uye['trade_mode'] == 'PERCENT' and islem_sayisi >= 50:
+                        if ai_ihtimal >= 80.0:
+                            ayarlar['trade_amount'] *= 2.0
+                            print(f"🔥 KSVİX MODU: {uye['telegram_id']} için risk 2x yapıldı! (AI: %{ai_ihtimal})")
+                            
+                    gorevler.append(islem_ac(uye['mexc_api_key'], uye['mexc_api_secret'], ayarlar, sinyal))
+                    
+                sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
+                await asyncio.sleep(0.5) # Güvenlik duvarını delmek için diğer sinyale geçmeden yarım saniye mola
+                
+                for uye, sonuc in zip(hedef_uyeler, sonuclar):
+                    telegram_id = uye['telegram_id']
+                    if isinstance(sonuc, Exception): pass
+                    elif sonuc.get('durum') == 'BASARILI':
+                        try:
+                            db.sinyale_katilan_ekle(signal_id, telegram_id)
+                            db.update_daily_stat(telegram_id, 'open', value=1)
+                        except: pass
+                        
+                        ksvix_not = "\n🔥 **KSVİX Modu Aktif:** Fırsat avı için marjin 2x yükseltildi!" if (dict(uye).get('ksvix_mode', 0) == 1 and uye['trade_mode'] == 'PERCENT' and ai_ihtimal >= 80.0) else ""
+                        
+                        if sonuc.get('eski_silindi'):
+                            mesaj_metni = f"✅ **#{sinyal['coin']} Sinyali Alındı!**{ai_ek_metin}{ksvix_not}\n🧹 Eski pusu emri iptal edildi, yeni sinyale geçildi. 🦅"
+                        else:
+                            mesaj_metni = f"✅ **#{sinyal['coin']} Sinyali Alındı!**{ai_ek_metin}{ksvix_not}\nPusudayız. 🦅"
+                            
+                        try: await client.send_message(telegram_id, mesaj_metni)
+                        except: pass
+                    else:
+                        hata_nedeni = sonuc.get('hata_mesaji', 'Bilinmiyor')
+                        try: await client.send_message(telegram_id, f"⚠️ **#{sinyal['coin']} Pas Geçildi!**\n🛑 **Sebep:** `{hata_nedeni}`")
+                        except: pass
 
 async def fiyat_takip_radari():
     borsa_ws = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
