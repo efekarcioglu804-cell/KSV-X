@@ -3,13 +3,18 @@ import json
 import sqlite3
 import numpy as np
 import pandas as pd
+import threading
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Input, concatenate
-from tensorflow.keras import backend as K  # 👑 YENİ: RAM Koruması için eklendi
 import database as db
 
 MODEL_PATH = "ksvix_lstm_model.h5"
+
+# 👑 KÜRESEL BEYİN (Global Model) VE İŞLEMCİ KİLİDİ
+GLOBAL_MODEL = None
+AI_KILIDI = threading.Lock()
+SON_EGITIM_SAYISI = 0
 
 def yapay_zeka_egit(df):
     X_lstm_list = []
@@ -90,6 +95,8 @@ def yapay_zeka_egit(df):
     return model
 
 def sinyali_analiz_et(yon, rsi, macd, hacim, fear_greed, vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani, mum_video_json):
+    global GLOBAL_MODEL, SON_EGITIM_SAYISI
+    
     conn = sqlite3.connect(db.DB_NAME, timeout=30)
     query = """
         SELECT yon, mum_gecmisi, rsi_degeri, macd_degeri, hacim_degeri, fear_greed, vwap_mesafe, trend_4h, direnc_mesafe, destek_mesafe, sikisma_orani,
@@ -102,19 +109,7 @@ def sinyali_analiz_et(yon, rsi, macd, hacim, fear_greed, vwap_mesafe, trend_4h, 
 
     if len(df) < 50:
         return len(df), 50.0
-        
-    model = None
-    if os.path.exists(MODEL_PATH) and len(df) % 10 != 0:
-        try:
-            model = load_model(MODEL_PATH)
-            if model.input_shape[1][1] != 10: raise ValueError("Eski model")
-        except:
-            model = yapay_zeka_egit(df)
-    else:
-        model = yapay_zeka_egit(df)
-        
-    if model is None: return len(df), 50.0
-    
+
     try:
         arr = np.array(json.loads(mum_video_json), dtype=float)
         if arr.size == 0 or arr.shape[0] != 20: return len(df), 50.0 
@@ -141,15 +136,35 @@ def sinyali_analiz_et(yon, rsi, macd, hacim, fear_greed, vwap_mesafe, trend_4h, 
             np.tanh(float(sikisma_orani))
         ]])
         
-        tahmin = model.predict([anlik_video, anlik_feat], verbose=0)
-        basari_ihtimali = round(float(tahmin[0][0]) * 100, 2)
-        if fear_greed <= 20: basari_ihtimali *= 0.8 
-        
-        # 👑 RAM KORUMASI: Tahmin bittikten sonra Keras'ın belleğini sıfırla
-        K.clear_session()
-        
+        # 🛡️ CPU KORUMASI VE SENKRONİZASYON
+        with AI_KILIDI:
+            if GLOBAL_MODEL is None:
+                if os.path.exists(MODEL_PATH):
+                    try:
+                        GLOBAL_MODEL = load_model(MODEL_PATH)
+                        SON_EGITIM_SAYISI = len(df)
+                    except:
+                        GLOBAL_MODEL = yapay_zeka_egit(df)
+                        SON_EGITIM_SAYISI = len(df)
+                else:
+                    GLOBAL_MODEL = yapay_zeka_egit(df)
+                    SON_EGITIM_SAYISI = len(df)
+                    
+            # 👑 SÜREKLİ ÖĞRENME: Her 10 yeni işlemde beyni arka planda günceller
+            if len(df) >= SON_EGITIM_SAYISI + 10:
+                print("🧠 KSVİX Yapay Zekası Yeni Verilerle Kendini Eğitiyor...")
+                GLOBAL_MODEL = yapay_zeka_egit(df)
+                SON_EGITIM_SAYISI = len(df)
+
+            if GLOBAL_MODEL is None: 
+                return len(df), 50.0
+
+            # 👑 HIZLI TAHMİN (Retracing hatasını engeller)
+            tahmin = GLOBAL_MODEL([anlik_video, anlik_feat], training=False)
+            basari_ihtimali = round(float(tahmin[0][0]) * 100, 2)
+            if fear_greed <= 20: basari_ihtimali *= 0.8 
+            
         return len(df), basari_ihtimali
     except Exception as e:
         print(f"🛑 AI Tahmin Hatası: {e}")
-        K.clear_session()
         return len(df), 50.0
