@@ -2,6 +2,15 @@ import ccxt.async_support as ccxt
 import asyncio
 import database as db
 
+# 🛡️ Akamai WAF Duvarını Delen Tarayıcı Parmak İzi (Headers)
+TARAYICI_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en-`q=0.7',
+    'Origin': 'https://www.mexc.com',
+    'Referer': 'https://www.mexc.com/'
+}
+
 def hayalet_enjektor(borsa, sembol, coin_adi):
     if borsa.markets is not None and sembol not in borsa.markets:
         base = coin_adi.replace('USDT', '')
@@ -22,7 +31,13 @@ def hayalet_enjektor(borsa, sembol, coin_adi):
         }
 
 async def islem_ac(api_key, api_secret, ayarlar, sinyal):
-    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    borsa = ccxt.mexc({
+        'apiKey': api_key, 
+        'secret': api_secret, 
+        'enableRateLimit': True, 
+        'options': {'defaultType': 'swap'},
+        'headers': TARAYICI_HEADERS # 🛡️ Tarayıcı Maskesi Aktif
+    })
     try:
         sembol = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
         yon = 'buy' if sinyal['yon'] == 'LONG' else 'sell'
@@ -95,9 +110,14 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         try: await borsa.close()
         except: pass
 
-# 👑 DÜZELTME: Doğrudan toplam miktarı alıp MEXC API yormadan limitleri dizer.
 async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_ratios, toplam_miktar):
-    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    borsa = ccxt.mexc({
+        'apiKey': api_key, 
+        'secret': api_secret, 
+        'enableRateLimit': True, 
+        'options': {'defaultType': 'swap'},
+        'headers': TARAYICI_HEADERS
+    })
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         await borsa.load_markets()
@@ -129,7 +149,7 @@ async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_rati
                         price=fiyat_hassas,
                         params={'reduceOnly': True}
                     )
-                    await asyncio.sleep(0.3) # Borsa API Spam Koruması
+                    await asyncio.sleep(0.3) 
                 except: pass
     except: pass
     finally:
@@ -137,7 +157,13 @@ async def tp_emirlerini_diz(api_key, api_secret, coin, yon, tp_fiyatlar, tp_rati
         except: pass
 
 async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
-    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    borsa = ccxt.mexc({
+        'apiKey': api_key, 
+        'secret': api_secret, 
+        'enableRateLimit': True, 
+        'options': {'defaultType': 'swap'},
+        'headers': TARAYICI_HEADERS
+    })
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         await borsa.load_markets()
@@ -149,7 +175,13 @@ async def bekleyen_emri_iptal_et(api_key, api_secret, coin):
         except: pass
 
 async def acil_kapat(api_key, api_secret, coin, yon):
-    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    borsa = ccxt.mexc({
+        'apiKey': api_key, 
+        'secret': api_secret, 
+        'enableRateLimit': True, 
+        'options': {'defaultType': 'swap'},
+        'headers': TARAYICI_HEADERS
+    })
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         await borsa.load_markets()
@@ -179,7 +211,13 @@ async def acil_kapat(api_key, api_secret, coin, yon):
         except: pass
 
 async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, stop_mode, fiyatlar):
-    borsa = ccxt.mexc({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+    borsa = ccxt.mexc({
+        'apiKey': api_key, 
+        'secret': api_secret, 
+        'enableRateLimit': True, 
+        'options': {'defaultType': 'swap'},
+        'headers': TARAYICI_HEADERS
+    })
     try:
         sembol = coin.replace('USDT', '') + '/USDT:USDT'
         await borsa.load_markets()
@@ -228,3 +266,4 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
     finally: 
         try: await borsa.close()
         except: pass
+        
