@@ -26,6 +26,7 @@ VIP_KANAL_ID = int(config.VIP_CHANNEL)
 GROQ_API_KEY = "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"
 TP_DIZILEN_ISLEMLER = set()
 SOHBET_HAFIZASI = {}
+MEXC_EMIR_KILIDI = asyncio.Lock() # 🛡️ YENİ EKLENEN KÜRESEL KİLİT
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
     tp_fiyatlari = [tp1, tp2, tp3, tp4]
@@ -552,6 +553,11 @@ async def genel_handler(event):
             islem_sayisi, ai_ihtimal = 0, 100.0
             coin = sinyal['coin']
             
+            # 🛡️ YENİ: Sentetik Varlık / Hisse Senedi Kalkanı
+            if "STOCK" in coin.upper() or "COPPER" in coin.upper():
+                print(f"🛑 SENTETİK VARLIK REDDEDİLDİ: #{coin} (MEXC API Desteklemez)")
+                return
+            
             dinamik_sinir = max(1.2, min(3.5, sikisma_orani * 1.5))
             red_nedeni = None
             
@@ -630,7 +636,10 @@ async def genel_handler(event):
                         
                 gorevler.append(islem_ac(uye['mexc_api_key'], uye['mexc_api_secret'], ayarlar, sinyal))
                 
-            sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
+            # 🛡️ MEXC WAF KORUMASI: Sinyaller aynı milisaniyede gelse bile sıraya sokulur!
+            async with MEXC_EMIR_KILIDI:
+                sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
+                await asyncio.sleep(0.5) # Güvenlik duvarını delmek için sadece yarım saniyelik nefes
             
             for uye, sonuc in zip(hedef_uyeler, sonuclar):
                 telegram_id = uye['telegram_id']
