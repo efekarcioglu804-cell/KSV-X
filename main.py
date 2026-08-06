@@ -22,7 +22,8 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# 👑 JARVIS YAPAY ZEKA: GOOGLE SDK ÇÖPE ATILDI, ÇIPLAK API KULLANILACAK
+# 👑 JARVIS YAPAY ZEKA (GROQ LLAMA-3.3-70B ALTYAPISI - %100 ÜCRETSİZ & KARTSIZ)
+GROQ_API_KEY = "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"
 TP_DIZILEN_ISLEMLER = set()
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
@@ -302,9 +303,9 @@ async def genel_handler(event):
             )
             await client.send_message(gonderen_id, sayac_msg)
             
-        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER (ÇIPLAK REST API VURUŞU)
+        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER (GROQ Llama-3.3-70B REST API)
         else:
-            if config.GEMINI_API_KEY:
+            if GROQ_API_KEY:
                 try:
                     stats = db.get_daily_stats(gonderen_id)
                     kar = stats['kar_usdt'] if stats else 0.0
@@ -316,40 +317,46 @@ async def genel_handler(event):
                     aktif_islem = cursor.fetchone()[0]
                     conn.close()
 
-                    gizli_promt = f"""
+                    system_prompt = f"""
                     Senin adın Jarvis. Sen KSVIX makinesinin yapay zekasısın. Karşındaki kişi senin efendin ve yaratıcın.
                     Ona istisnasız her zaman "Kralım👑" diye hitap etmelisin. 
                     Senin karakterin: Konuşkan, hoşsohbet, mütevazı ama güçlü fikirleri olan, dobralı, yanıtları yumuşatmayan ve gerektiğinde zekice espriler yapabilen bir yapı. 
                     Şu anki gerçek zamanlı kasa durumumuz: Bugün {acilan} işleme girdik. Net kâr/zararımız: {kar:.2f}. İçerideki aktif işlem sayısı: {aktif_islem}.
-                    Kullanıcı sana şunu yazdı: "{mesaj}"
                     
                     Görevlerin:
                     1. Eğer sana selam veriyorsa samimi cevap ver. Üst üste selam veriyorsa hafızanı kullanıp "Kralım zaten selamlaştık, dur piyasaya odaklanayım" tarzında zekice takıl.
-                    2. Eğer "durumlar nasıl, nasılız" gibi kasanın durumunu soruyorsa, yukarıdaki kasa durumunu analiz et. Kârdayken tebrik et ve motive et, zarardayken dobralı ve gerçekçi bir şekilde stratejik bir tavsiye ver (örn: "Kralım bugün pek iyi gitmiyoruz, istersen işlemleri biraz yavaşlatalım" vs.).
+                    2. Eğer "durumlar nasıl, nasılız" gibi kasanın durumunu soruyorsa, yukarıdaki kasa durumunu analiz et. Kârdayken tebrik et ve motive et, zarardayken dobralı ve gerçekçi bir şekilde stratejik bir tavsiye ver.
                     3. Kısa, maskülen, net ve lafı dolandırmayan bir dille cevap ver.
                     """
                     
-                    # 🚀 GOOGLE SDK'YI BYPASS EDEN ÇIPLAK REST API VURUŞU 🚀
-                    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={config.GEMINI_API_KEY}"
-                    
+                    api_url = "https://api.groq.com/openai/v1/chat/completions"
+                    headers = {
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json"
+                    }
                     payload = {
-                        "contents": [{"parts": [{"text": gizli_promt}]}]
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": mesaj}
+                        ],
+                        "temperature": 0.7
                     }
                     
-                    res = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
+                    res = requests.post(api_url, headers=headers, json=payload, timeout=10)
                     
                     if res.status_code == 200:
-                        cevap = res.json()['candidates'][0]['content']['parts'][0]['text']
+                        cevap = res.json()['choices'][0]['message']['content']
                         await client.send_message(gonderen_id, cevap)
                     else:
-                        print(f"Google API Reddedildi: {res.text}")
+                        print(f"Groq API Reddedildi: {res.text}")
                         await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
 
                 except Exception as e:
                     print(f"Jarvis AI Hatası: {e}")
                     await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
             else:
-                await client.send_message(gonderen_id, "🤖 Kralım, sohbet modülüm kapalı. Lütfen .env dosyama GEMINI_API_KEY ekle.")
+                await client.send_message(gonderen_id, "🤖 Kralım, sohbet modülüm kapalı.")
             
     else:
         if event.chat_id == VIP_KANAL_ID:
