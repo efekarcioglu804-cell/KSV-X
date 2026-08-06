@@ -22,9 +22,6 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# 👑 HAFIZA: TP'si dizilmiş işlemleri tekrar tekrar dizmemek için
-TP_DIZILEN_ISLEMLER = set()
-
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
     tp_fiyatlari = [tp1, tp2, tp3, tp4]
     try:
@@ -262,6 +259,16 @@ async def genel_handler(event):
                     else:
                         await client.send_message(gonderen_id, "❄️ **KSVİX Otonom Modu Kapatıldı.**\nSistem standart marjin ve bekleme kurallarına döndü.")
         
+        elif mesaj.startswith('/tüm_sinyaller'):
+            db.update_signal_pref(gonderen_id, 'ALL')
+            await client.send_message(gonderen_id, "📡 **Sinyal Radarı Güncellendi!**\nArtık hem `SCANNER` hem de `FORMASYON AVCISI` sinyallerine girilecek.")
+        elif mesaj.startswith('/formasyon'):
+            db.update_signal_pref(gonderen_id, 'FORMASYON')
+            await client.send_message(gonderen_id, "📡 **Sinyal Radarı Güncellendi!**\nArtık SADECE `FORMASYON AVCISI` sinyallerine girilecek. (Scanner yoksayılacak).")
+        elif mesaj.startswith('/KSV_scanner'):
+            db.update_signal_pref(gonderen_id, 'SCANNER')
+            await client.send_message(gonderen_id, "📡 **Sinyal Radarı Güncellendi!**\nArtık SADECE `SCANNER` (Hacim/OTT) sinyallerine girilecek. (Formasyon yoksayılacak).")
+            
         elif mesaj.startswith('/durdur'):
             db.toggle_user_active(gonderen_id, 0)
             await client.send_message(gonderen_id, "🛑 **Sistem Uyku Modunda!** Yeni sinyallere giriş yapılmayacak.")
@@ -296,6 +303,20 @@ async def genel_handler(event):
         if event.chat_id == VIP_KANAL_ID:
             sinyal = parse_signal(mesaj)
             if not sinyal: return
+            
+            is_formasyon_avcisi = "FORMASYON AVCISI" in mesaj.upper()
+
+            # 👑 SİNYAL TERCİHİNE GÖRE KULLANICI FİLTRELEME
+            aktif_uyeler = db.get_all_active_users()
+            hedef_uyeler = []
+            for uye in aktif_uyeler:
+                pref = dict(uye).get('signal_pref', 'ALL')
+                if pref == 'FORMASYON' and not is_formasyon_avcisi: continue
+                if pref == 'SCANNER' and is_formasyon_avcisi: continue
+                hedef_uyeler.append(uye)
+                
+            if not hedef_uyeler:
+                return # Kimse bu sinyal tipini beklemiyor, pas geç.
 
             borsa_tmp = ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
             rsi_degeri, macd_degeri, hacim_degeri, atr, vwap_mesafe, onceki_vwap_mesafe = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
@@ -340,8 +361,6 @@ async def genel_handler(event):
             islem_sayisi, ai_ihtimal = 0, 100.0
             coin = sinyal['coin']
             
-            is_formasyon_avcisi = "FORMASYON AVCISI" in mesaj.upper()
-            
             dinamik_sinir = max(1.2, min(3.5, sikisma_orani * 1.5))
             red_nedeni = None
             
@@ -362,8 +381,7 @@ async def genel_handler(event):
                     
                 if red_nedeni:
                     print(f"🛑 REDDEDİLDİ: #{coin} | Sebep: {red_nedeni}")
-                    aktif_uyeler = db.get_all_active_users()
-                    for uye in aktif_uyeler:
+                    for uye in hedef_uyeler:
                         try: await client.send_message(uye['telegram_id'], f"🛑 **#{coin} SİNYALİ REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
                         except: pass
                     return
@@ -376,12 +394,12 @@ async def genel_handler(event):
             except Exception as e:
                 print(f"⚠️ AI Analiz Hatası: {e}")
 
+            # 👑 OTONOM YARGIÇ REDDİ
             if not is_formasyon_avcisi:
                 if islem_sayisi >= 50 and ai_ihtimal < 70.0:
                     red_nedeni = f"Yapay Zeka Onaylamadı (Minimum Beklenen: %70 | Mevcut Skor: %{ai_ihtimal})"
                     print(f"🛑 REDDEDİLDİ [YAPAY ZEKA]: #{coin} | Sebep: {red_nedeni}")
-                    aktif_uyeler = db.get_all_active_users()
-                    for uye in aktif_uyeler:
+                    for uye in hedef_uyeler:
                         try: await client.send_message(uye['telegram_id'], f"🤖 **#{coin} SİNYALİ AI TARAFINDAN REDDEDİLDİ!**\n❌ **Sebep:** `{red_nedeni}`")
                         except: pass
                     return
@@ -411,11 +429,8 @@ async def genel_handler(event):
             except: pass
             finally: conn.close()
             
-            aktif_uyeler = db.get_all_active_users()
-            if not aktif_uyeler: return
-                
             gorevler = []
-            for uye in aktif_uyeler:
+            for uye in hedef_uyeler:
                 ayarlar = {'trade_mode': uye['trade_mode'], 'trade_amount': uye['trade_amount'], 'max_trades': uye['max_trades']}
                 
                 if dict(uye).get('ksvix_mode', 0) == 1 and uye['trade_mode'] == 'PERCENT' and islem_sayisi >= 50:
@@ -427,7 +442,7 @@ async def genel_handler(event):
                 
             sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
             
-            for uye, sonuc in zip(aktif_uyeler, sonuclar):
+            for uye, sonuc in zip(hedef_uyeler, sonuclar):
                 telegram_id = uye['telegram_id']
                 if isinstance(sonuc, Exception): pass
                 elif sonuc.get('durum') == 'BASARILI':
@@ -519,6 +534,7 @@ async def fiyat_takip_radari():
 
                 if durum == 'BEKLIYOR':
                     gecen_sure = su_an - (eklenme_zamani or su_an)
+                    
                     ksvix_kullanicilar = [str(u['telegram_id']) for u in aktif_uyeler if dict(u).get('ksvix_mode', 0) == 1]
                     
                     if fiyat_last > 0 and giris > 0 and ((giris / fiyat_last > 5) or (fiyat_last / giris > 5)):
@@ -761,7 +777,6 @@ async def golge_senkronizator():
                             katilanlar_listesi = [x for x in str(katilanlar).split(',') if x]
                             
                             if sembol in aktif_semboller and uye_tid in katilanlar_listesi:
-                                # 👑 LİMİT EMİR GARANTİSİ: İşlem içerideyken TP Limitleri dizilmemişse diz!
                                 islem_anahtari = f"{uye_tid}_{i_id}"
                                 if islem_anahtari not in TP_DIZILEN_ISLEMLER:
                                     try:
