@@ -27,7 +27,7 @@ VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
 # 👑 JARVIS YAPAY ZEKA BEYNİ BAŞLATILIYOR (YENİ SİSTEM)
 if config.GEMINI_API_KEY:
-    jarvis_client = genai.Client(api_key=config.GEMINI_API_KEY)
+    jarvis_client = genai.Client(vertexai=True, project="1088041297344", location="asia-northeast1")
 else:
     jarvis_client = None
 
