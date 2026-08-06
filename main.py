@@ -8,7 +8,9 @@ import json
 import requests
 import ccxt.pro as ccxt 
 from telethon import TelegramClient, events
-import google.generativeai as genai
+
+# 👑 ESKİ KÜTÜPHANEYİ ÇÖPE ATTIK, YENİ NESİL AQ. DESTEKLİ GOOGLE-GENAI KURULDU
+from google import genai
 
 import config
 import database as db
@@ -23,12 +25,11 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# 👑 JARVIS YAPAY ZEKA BEYNİ BAŞLATILIYOR
+# 👑 JARVIS YAPAY ZEKA BEYNİ BAŞLATILIYOR (YENİ SİSTEM)
 if config.GEMINI_API_KEY:
-    genai.configure(api_key=config.GEMINI_API_KEY)
-    jarvis_brain = genai.GenerativeModel('gemini-1.5-flash')
+    jarvis_client = genai.Client(api_key=config.GEMINI_API_KEY)
 else:
-    jarvis_brain = None
+    jarvis_client = None
 
 SOHBET_HAFIZASI = {}
 TP_DIZILEN_ISLEMLER = set()
@@ -310,12 +311,12 @@ async def genel_handler(event):
             )
             await client.send_message(gonderen_id, sayac_msg)
             
-        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER
+        # 👑 KOMUT DEĞİLSE SOHBET MODÜLÜ DEVREYE GİRER (YENİ SİSTEM)
         else:
-            if jarvis_brain:
+            if jarvis_client:
                 try:
                     if gonderen_id not in SOHBET_HAFIZASI:
-                        SOHBET_HAFIZASI[gonderen_id] = jarvis_brain.start_chat(history=[])
+                        SOHBET_HAFIZASI[gonderen_id] = jarvis_client.chats.create(model='gemini-1.5-flash')
                     
                     sohbet = SOHBET_HAFIZASI[gonderen_id]
                     
