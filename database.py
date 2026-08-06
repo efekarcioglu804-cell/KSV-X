@@ -23,7 +23,8 @@ def init_db():
             max_trades INTEGER DEFAULT 8,
             tp_ratios TEXT DEFAULT '25,25,25,25',
             stop_mode TEXT DEFAULT 'NONE',
-            ksvix_mode INTEGER DEFAULT 0
+            ksvix_mode INTEGER DEFAULT 0,
+            signal_pref TEXT DEFAULT 'ALL'
         )
     ''')
     cursor.execute('''
@@ -72,6 +73,8 @@ def init_db():
     # Eski tablolara yeni kolonları sarsıntısız enjekte et
     try: cursor.execute("ALTER TABLE users ADD COLUMN ksvix_mode INTEGER DEFAULT 0")
     except: pass
+    try: cursor.execute("ALTER TABLE users ADD COLUMN signal_pref TEXT DEFAULT 'ALL'")
+    except: pass
     
     try: cursor.execute("ALTER TABLE active_signals ADD COLUMN eklenme_zamani REAL")
     except: pass
@@ -117,8 +120,8 @@ def add_user(telegram_id, api_key, api_secret):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades, tp_ratios, stop_mode, ksvix_mode)
-        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8, '25,25,25,25', 'NONE', 0)
+        INSERT INTO users (telegram_id, mexc_api_key, mexc_api_secret, is_active, trade_mode, trade_amount, max_trades, tp_ratios, stop_mode, ksvix_mode, signal_pref)
+        VALUES (?, ?, ?, 1, 'PERCENT', 5, 8, '25,25,25,25', 'NONE', 0, 'ALL')
         ON CONFLICT(telegram_id) DO UPDATE SET
             mexc_api_key=excluded.mexc_api_key,
             mexc_api_secret=excluded.mexc_api_secret,
@@ -160,6 +163,13 @@ def toggle_user_active(telegram_id, durum):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE users SET is_active = ? WHERE telegram_id = ?', (durum, telegram_id))
+    conn.commit()
+    conn.close()
+
+def update_signal_pref(telegram_id, pref):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET signal_pref = ? WHERE telegram_id = ?", (pref, telegram_id))
     conn.commit()
     conn.close()
 
