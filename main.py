@@ -398,7 +398,7 @@ async def genel_handler(event):
                         "temperature": 0.5
                     }
                     
-                    res = requests.post(api_url, headers=headers, json=payload, timeout=15)
+                    res = await asyncio.to_thread(requests.post, api_url, headers=headers, json=payload, timeout=15)
                     
                     if res.status_code == 200:
                         response_message = res.json()['choices'][0]['message']
@@ -463,7 +463,7 @@ async def genel_handler(event):
                             del payload["tools"]
                             del payload["tool_choice"]
                             
-                            res2 = requests.post(api_url, headers=headers, json=payload, timeout=15)
+                            res2 = await asyncio.to_thread(requests.post, api_url, headers=headers, json=payload, timeout=15)
                             if res2.status_code == 200:
                                 final_cevap = res2.json()['choices'][0]['message']['content']
                                 SOHBET_HAFIZASI[gonderen_id].append({"role": "assistant", "content": final_cevap})
@@ -630,14 +630,7 @@ async def genel_handler(event):
                         
                 gorevler.append(islem_ac(uye['mexc_api_key'], uye['mexc_api_secret'], ayarlar, sinyal))
                 
-            sonuclar = []
-            for gorev in gorevler:
-                try:
-                    res = await gorev
-                    sonuclar.append(res)
-                    await asyncio.sleep(1.5)
-                except Exception as e:
-                    sonuclar.append(e)
+            sonuclar = await asyncio.gather(*gorevler, return_exceptions=True)
             
             for uye, sonuc in zip(hedef_uyeler, sonuclar):
                 telegram_id = uye['telegram_id']
