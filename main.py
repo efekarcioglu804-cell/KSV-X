@@ -26,9 +26,10 @@ client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HAS
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
 # 👑 JARVIS YAPAY ZEKA BEYNİ BAŞLATILIYOR (YENİ SİSTEM)
-import os
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "key.json"
-jarvis_client = genai.Client()
+if config.GEMINI_API_KEY:
+    jarvis_client = genai.Client(api_key=config.GEMINI_API_KEY)
+else:
+    jarvis_client = None
 
 SOHBET_HAFIZASI = {}
 TP_DIZILEN_ISLEMLER = set()
