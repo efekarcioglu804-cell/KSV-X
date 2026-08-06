@@ -22,9 +22,10 @@ asyncio.set_event_loop(loop)
 client = TelegramClient('kralin_makinesi_session', config.API_ID, config.API_HASH)
 VIP_KANAL_ID = int(config.VIP_CHANNEL)
 
-# 👑 JARVIS YAPAY ZEKA (GROQ LLAMA-3.3-70B ALTYAPISI - %100 ÜCRETSİZ & KARTSIZ)
+# 👑 JARVIS YAPAY ZEKA (GROQ LLAMA-3.3-70B ALTYAPISI - HAFIZALI SİSTEM)
 GROQ_API_KEY = "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"
 TP_DIZILEN_ISLEMLER = set()
+SOHBET_HAFIZASI = {}
 
 def gercek_kar_hesapla(yon, giris, tp1, tp2, tp3, tp4, kapanis_fiyati, kaldirac, trade_amount, asama_kapanis, tp_ratios_str):
     tp_fiyatlari = [tp1, tp2, tp3, tp4]
@@ -307,6 +308,9 @@ async def genel_handler(event):
         else:
             if GROQ_API_KEY:
                 try:
+                    if gonderen_id not in SOHBET_HAFIZASI:
+                        SOHBET_HAFIZASI[gonderen_id] = []
+
                     stats = db.get_daily_stats(gonderen_id)
                     kar = stats['kar_usdt'] if stats else 0.0
                     acilan = stats['acilan_islem'] if stats else 0
@@ -329,6 +333,15 @@ async def genel_handler(event):
                     3. Kısa, maskülen, net ve lafı dolandırmayan bir dille cevap ver.
                     """
                     
+                    # Kullanıcının mesajını hafızaya yaz
+                    SOHBET_HAFIZASI[gonderen_id].append({"role": "user", "content": mesaj})
+                    
+                    # Hafıza çok dolmasın, son 10 mesajı tutsun (bağlam kopmasın)
+                    if len(SOHBET_HAFIZASI[gonderen_id]) > 10:
+                        SOHBET_HAFIZASI[gonderen_id] = SOHBET_HAFIZASI[gonderen_id][-10:]
+                        
+                    mesaj_gecmisi = [{"role": "system", "content": system_prompt}] + SOHBET_HAFIZASI[gonderen_id]
+                    
                     api_url = "https://api.groq.com/openai/v1/chat/completions"
                     headers = {
                         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -336,10 +349,7 @@ async def genel_handler(event):
                     }
                     payload = {
                         "model": "llama-3.3-70b-versatile",
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": mesaj}
-                        ],
+                        "messages": mesaj_gecmisi,
                         "temperature": 0.7
                     }
                     
@@ -347,13 +357,19 @@ async def genel_handler(event):
                     
                     if res.status_code == 200:
                         cevap = res.json()['choices'][0]['message']['content']
+                        # Kendi verdiği cevabı da unutmaması için hafızaya kaydet
+                        SOHBET_HAFIZASI[gonderen_id].append({"role": "assistant", "content": cevap})
                         await client.send_message(gonderen_id, cevap)
                     else:
                         print(f"Groq API Reddedildi: {res.text}")
+                        # API hata verdiyse son eklediğimiz hatalı mesajı silelim
+                        if len(SOHBET_HAFIZASI[gonderen_id]) > 0: SOHBET_HAFIZASI[gonderen_id].pop()
                         await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
 
                 except Exception as e:
                     print(f"Jarvis AI Hatası: {e}")
+                    if gonderen_id in SOHBET_HAFIZASI and len(SOHBET_HAFIZASI[gonderen_id]) > 0 and SOHBET_HAFIZASI[gonderen_id][-1]["role"] == "user":
+                        SOHBET_HAFIZASI[gonderen_id].pop()
                     await client.send_message(gonderen_id, "🧠 Kralım, zihnimde anlık bir dalgalanma oldu. Piyasaya odaklıyım şu an!")
             else:
                 await client.send_message(gonderen_id, "🤖 Kralım, sohbet modülüm kapalı.")
