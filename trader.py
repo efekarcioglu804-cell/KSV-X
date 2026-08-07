@@ -2,11 +2,11 @@ import ccxt.async_support as ccxt
 import asyncio
 import database as db
 
-# 🛡️ Akamai WAF Duvarını Delen Tarayıcı Parmak İzi (Headers)
+# 🛡️ Akamai'yi Kör Eden Tarayıcı Maskesi
 TARAYICI_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en-`q=0.7',
+    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
     'Origin': 'https://www.mexc.com',
     'Referer': 'https://www.mexc.com/'
 }
@@ -36,7 +36,7 @@ async def islem_ac(api_key, api_secret, ayarlar, sinyal):
         'secret': api_secret, 
         'enableRateLimit': True, 
         'options': {'defaultType': 'swap'},
-        'headers': TARAYICI_HEADERS # 🛡️ Tarayıcı Maskesi Aktif
+        'headers': TARAYICI_HEADERS
     })
     try:
         sembol = sinyal['coin'].replace('USDT', '') + '/USDT:USDT'
@@ -266,4 +266,3 @@ async def pozisyon_guncelle(api_key, api_secret, coin, yon, asama, tp_ratios, st
     finally: 
         try: await borsa.close()
         except: pass
-        
