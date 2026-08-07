@@ -1,5 +1,5 @@
 telethon==1.34.0
-ccxt==4.2.59
+ccxt
 cryptography
 python-dotenv==1.0.1
 requests
@@ -7,3 +7,4 @@ numpy
 pandas
 scikit-learn
 tensorflow-cpu
+matplotlib
