@@ -103,6 +103,7 @@ def islem_simule_et(bakiye, mod, yon, giris, tp1, tp2, tp3, tp4, sl, kaldirac, a
 
 CANLI_FIYATLAR = {}
 AKTIF_YAYINLAR = set()
+TP_DIZILEN_ISLEMLER = set()
 
 async def canli_yayin_ajani(borsa, sembol):
     while sembol in AKTIF_YAYINLAR:
