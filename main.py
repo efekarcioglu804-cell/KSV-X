@@ -779,11 +779,9 @@ async def golge_senkronizator():
                             
                             if sembol in aktif_semboller and uye_tid in katilanlar_listesi:
                                 islem_anahtari = f"{uye_tid}_{i_id}"
-                                try:
-                                    acik_emirler = await borsa.fetch_open_orders(sembol)
-                                    
-                                    # 1. Eksik TP Emirlerini Diz
-                                    if islem_anahtari not in TP_DIZILEN_ISLEMLER:
+                                if islem_anahtari not in TP_DIZILEN_ISLEMLER:
+                                    try:
+                                        acik_emirler = await borsa.fetch_open_orders(sembol)
                                         tp_limit_var = any(e['type'] == 'limit' for e in acik_emirler)
                                         if not tp_limit_var:
                                             toplam_miktar = aktif_semboller[sembol]
@@ -791,31 +789,7 @@ async def golge_senkronizator():
                                                 tp_emirlerini_diz(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon, [tp1, tp2, tp3, tp4], uye['tp_ratios'], toplam_miktar)
                                             )
                                         TP_DIZILEN_ISLEMLER.add(islem_anahtari)
-                                    
-                                    # 2. 👑 YENİ: GÖLGE AJAN TP AVCISI (Wick Yakalayıcı)
-                                    if islem_anahtari in TP_DIZILEN_ISLEMLER and asama < 5:
-                                        # Sadece KSVIX'in dizdiği limit emirleri say
-                                        limit_emirler = [e for e in acik_emirler if e['type'] == 'limit']
-                                        kalan_tp_sayisi = len(limit_emirler)
-                                        
-                                        # Eğer dizilen emirler azaldıysa (vurulduysa)
-                                        if kalan_tp_sayisi < 4:
-                                            beklenen_asama = 5 - kalan_tp_sayisi
-                                            
-                                            # Eğer veritabanındaki aşama geride kalmışsa, otonom güncelle!
-                                            if beklenen_asama > asama and beklenen_asama >= 2:
-                                                cursor.execute("UPDATE active_signals SET asama = ? WHERE id = ?", (beklenen_asama, i_id))
-                                                conn.commit()
-                                                
-                                                fiyatlar = {'giris': giris, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3}
-                                                client.loop.create_task(
-                                                    pozisyon_guncelle(uye['mexc_api_key'], uye['mexc_api_secret'], coin, yon, beklenen_asama, uye['tp_ratios'], uye['stop_mode'], fiyatlar)
-                                                )
-                                                
-                                                msg = f"🕵️ **GÖLGE AJAN TESPİTİ** | #{coin}\n⚡ Hızlı iğne (Ninja Wick) yakalandı!\n🎯 Borsada TP{beklenen_asama-1} emrinin vurulduğu tespit edildi.\n🛡️ Stop kalkanı otonom olarak taşındı! 🦅"
-                                                client.loop.create_task(client.send_message(int(uye_tid), msg))
-
-                                except: pass
+                                    except: pass
 
                             elif sembol not in aktif_semboller and uye_tid in katilanlar_listesi:
                                 katilanlar_listesi.remove(uye_tid)
